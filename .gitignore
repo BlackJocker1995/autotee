@@ -1,0 +1,12 @@
+*.env
+.idea
+.vscode
+*.pdf
+*pyc
+a2no_case
+a2shot
+a3run_statistics
+a5test
+dataset
+file
+metric
