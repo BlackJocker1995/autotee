@@ -15,46 +15,54 @@ class LModelReAct():
     """
     ReAct policy
     """
-    def __init__(self, env_class:Type[Scenario]):
+    REACT_PROMPT_TEMPLATE = """
+    You run in a thought, action, observation loop.
+    At the end of the loop you output an Answer.
+    Use thought to describe your thoughts about the question you have been asked.
+    
+    The <action> you can only choose from:
+    
+    {methods_name}
+    
+    Their definition are:
+    
+    {methods_doc}
+
+    Your output should be a string in json format.
+    The json format that the output needs to follow:
+    {output_schema}
+    
+    where
+    - thought: you should always think about what to do.
+    - action: the function to take, should be one of the available actions, when you get an answer.
+    - argument: the arguments you need to perform the function.
+    - consistent: Unless verified through verify_output_consistency and evident is provided, it will always remain False.
+    When you think you have found the answer, do not output actions, but output answer.
+    Your output will be directly parsed as a json string, so make sure your output is a valid json string, it must be in str format.
+    Your output will be used to create an LLMOutput object using LLMOutput.model_validate_json
+    Using None instead of null or "null".
+    Please note that your output will be parsed directly.
+    If the format is incorrect, the parsing will fail and you will be severely criticized.
+    Perform one operation at a time in each output, do not include multiple operations in one output.
+    """
+
+    def __init__(self, env_class: Type[Scenario]):
+        """Initialize ReAct model with environment class.
+        
+        Args:
+            env_class (Type[Scenario]): The scenario class containing available actions
+        """
         self.actions = None
         self.candidate = None
         self.env_class = env_class
         self.code_dynamic = None
         self.methods_name, self.methods_structure = env_class.get_class_method_info()
 
-        methods_doc = "\n".join(self.methods_structure)
-        methods_name = "\n".join(self.methods_name)
-
-        self.react_prompt = (rf"""
-        You run in a thought, action, observation loop.
-        At the end of the loop you output an Answer.
-        Use thought to describe your thoughts about the question you have been asked.
-        
-        The <action> you can only choose from:
-        
-        {methods_name}
-        
-        Their definition are:
-        
-        {methods_doc}
-
-        Your output should be a string in json format. 
-        The json format that the output needs to follow: 
-        {Output.ReactOutputForm.model_json_schema()}
-        
-        where
-        - thought: you should always think about what to do.
-        - action: the function to take, should be one of the available actions, when you get an answer.
-        - argument: the arguments you need to perform the function.
-        - consistent: Unless verified through verify_output_consistency and evident is provided, it will always remain False.
-        When you think you have found the answer, do not output actions, but output answer.
-        Your output will be directly parsed as a json string, so make sure your output is a valid json string, it must be in str format.
-        Your output will be used to create an LLMOutput object using LLMOutput.model_validate_json
-        Using None instead of null or "null".
-        Please note that your output will be parsed directly.
-        If the format is incorrect, the parsing will fail and you will be severely criticized.
-        Perform one operation at a time in each output, do not include multiple operations in one output.
-        """.strip())
+        self.react_prompt = self.REACT_PROMPT_TEMPLATE.format(
+            methods_name="\n".join(self.methods_name),
+            methods_doc="\n".join(self.methods_structure),
+            output_schema=Output.ReactOutputForm.model_json_schema()
+        ).strip()
         # - observation: the result of action
         # self.model_agent.messages_memary.append({"role": "system", "content": self.react_prompt})
 
@@ -115,7 +123,7 @@ class ReActModel(LModelReAct):
             self.agent.messages_memary.append({"role": "assistant", "content": result.model_dump_json()})
         return result
 
-    def infer_react(self, question, max_turns=20) -> int:
+    def infer_react(self, question:str, max_turns=20) -> int:
         # Initialize attempt counter
         attempt = 0
         # Set the initial prompt to the question
@@ -141,12 +149,7 @@ class ReActModel(LModelReAct):
             if llm_output is None:
                 continue
 
-            # Log the attempt and received output
-            logger.info("*" * 40 + f" {attempt} try " + "*" * 40)
-            # logger.debug(f"Receive: {llm_output}")
-            logger.info(f"Thought: {llm_output.thought}")
-            logger.info(f"Action: {llm_output.action}")
-            logger.info(f"Consistent: {llm_output.consistent}")
+            self._log_attempt(attempt, llm_output)
 
             # If the output is consistent, return the attempt count
             if llm_output.consistent and llm_output.action is None:
@@ -154,16 +157,10 @@ class ReActModel(LModelReAct):
 
             # Check if the action is known
             if llm_output.action not in self.methods_name:
-                logger.info("Unknown action: {}({})".format(
-                    llm_output.action, llm_output.argument
-                ))
-                # Update the prompt with an error message
-                next_prompt = (f"Action Error - Unknown action: {llm_output.action}. "
-                               f"You can only choose from {self.env_class.get_class_method_info()[0]}")
-                # attempt -= 1
+                next_prompt = self._handle_unknown_action(llm_output)
                 continue
 
-            # Log the action being run
+            # Log and execute the action
             logger.info(truncate_string("Running {}({})".format(llm_output.action, llm_output.argument)))
             try:
                 # Retrieve the method corresponding to the action
@@ -194,3 +191,30 @@ class ReActModel(LModelReAct):
 
         # Return -1 if the maximum number of turns is reached without a consistent output
         return -1
+
+    def _log_attempt(self, attempt: int, llm_output: Output.ReactOutputForm) -> None:
+        """Log details of the current attempt.
+        
+        Args:
+            attempt (int): Current attempt number
+            llm_output (Output.ReactOutputForm): Output from LLM
+        """
+        logger.info("*" * 40 + f" {attempt} try " + "*" * 40)
+        logger.info(f"Thought: {llm_output.thought}")
+        logger.info(f"Action: {llm_output.action}")
+        logger.info(f"Consistent: {llm_output.consistent}")
+
+    def _handle_unknown_action(self, llm_output: Output.ReactOutputForm) -> str:
+        """Handle unknown action error and return updated prompt.
+        
+        Args:
+            llm_output (Output.ReactOutputForm): Output containing unknown action
+            
+        Returns:
+            str: Updated prompt with error message
+        """
+        logger.info("Unknown action: {}({})".format(
+            llm_output.action, llm_output.argument
+        ))
+        return (f"Action Error - Unknown action: {llm_output.action}. "
+                f"You can only choose from {self.env_class.get_class_method_info()[0]}")
