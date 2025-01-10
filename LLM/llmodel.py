@@ -1,35 +1,61 @@
-import abc
-import json
+from typing import Type, Optional, Dict, List
+from abc import ABC, abstractmethod
 import os
-from typing import Type
-
-import anthropic
-import ollama
-from dotenv import load_dotenv
+from pathlib import Path
+from pydantic import BaseModel, BaseSettings
 from loguru import logger
-from openai import OpenAI
-from pydantic import BaseModel
-import instructor
 
-from LLM.output import Output
-from a4test.test_assistance import timing_decorator
+class LLMConfig(BaseSettings):
+    """Configuration for LLM models. Only contains non-sensitive settings."""
+    ollama_host: str = "http://localhost:11434"
+    timeout: int = 300
+    max_retries: int = 3
+    
+    class Config:
+        env_file = ".env"
 
+def get_api_key(key_name: str) -> Optional[str]:
+    """Safely get API key from environment variables."""
+    key = os.getenv(key_name)
+    if not key:
+        logger.warning(f"{key_name} not found in environment variables")
+    return key
 
-class LModel:
-    """
-    LLM client base class
-    """
+class LModel(ABC):
+    """Base class for LLM implementations."""
+    
+    def __init__(self, model_name: str, config: Optional[LLMConfig] = None):
+        self.config = config or LLMConfig()
+        self.model_name = model_name
+        self.messages_memory: List[Dict[str, str]] = []
+        self._initialize_client()
 
-    def __init__(self):
-        """
-        Initialize the LModel with default values.
-        """
-        self.client = None
-        self.client_model = ''
-        self.name = ''
-        self.system_prompt = ""
-        self.json_prompt = ""
-        self.messages_memory = []
+    @abstractmethod
+    def _initialize_client(self) -> None:
+        """Initialize the model client."""
+        pass
+
+    @abstractmethod
+    def execute(self, messages: List[Dict[str, str]], 
+                schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
+        """Execute model inference."""
+        pass
+
+    def query(self, message: str, output_format: Optional[Type[BaseModel]] = None,
+              remember: bool = True) -> BaseModel:
+        """Process a query with optional output format validation."""
+        tmp_messages = self.messages_memory.copy()
+        tmp_messages.append({"role": "user", "content": message})
+        
+        result = self.execute(tmp_messages, output_format)
+        
+        if remember:
+            self.messages_memory.extend([
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": result.model_dump_json()}
+            ])
+        
+        return result
 
     def add_message(self, role: str, content: str):
         """
@@ -242,42 +268,31 @@ class LModel:
 
 
 class OpenAIModel(LModel):
-    def __init__(self, client_model):
-        LModel.__init__(self)
-        load_dotenv()
-        self.client = OpenAI(
-            api_key=os.getenv('OPENAI')
-        )
-        self.client_model = client_model
-
-    def execute(self, messages:list, schema_model: Type[BaseModel] = None):
-        max_retries = 3
-        retries = 0
-
-        while retries < max_retries:
+    """OpenAI API implementation."""
+    
+    def _initialize_client(self) -> None:
+        api_key = get_api_key("OPENAI")
+        if not api_key:
+            raise ValueError("OpenAI API key not found in environment variables")
+        self.client = OpenAI(api_key=api_key)
+    
+    def execute(self, messages: List[Dict[str, str]], 
+                schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
+        for attempt in range(self.config.max_retries):
             try:
-                if schema_model:
-                    completion = self.client.beta.chat.completions.parse(
-                        model=self.client_model, messages=messages,
-                        response_format=schema_model,
-                        timeout=300
-                    )
-                    return schema_model.model_validate_json(completion.choices[0].message.content)
-                else:
-                    completion = self.client.beta.chat.completions.parse(
-                        model=self.client_model,
-                        messages=messages,
-                        response_format=Output.StructureAnswer,
-                        timeout = 300
-                    )
-                    return Output.StructureAnswer.model_validate_json(completion.choices[0].message.content)
-
+                completion = self.client.beta.chat.completions.parse(
+                    model=self.model_name,
+                    messages=messages,
+                    response_format=schema_model or Output.StructureAnswer,
+                    timeout=self.config.timeout
+                )
+                return (schema_model or Output.StructureAnswer).model_validate_json(
+                    completion.choices[0].message.content
+                )
             except Exception as e:
-                retries += 1
-                if retries >= max_retries:
+                if attempt == self.config.max_retries - 1:
                     raise e
-                # Optionally log the exception
-                print(f"Attempt {retries} failed: {e}")
+                logger.warning(f"Attempt {attempt + 1} failed: {e}")
 
     def close(self):
         self.client.close()
@@ -294,35 +309,23 @@ class OllamaModel(LModel):
             raise ValueError("init ollama failed")
         self.client_model = client_model
 
-    def execute(self, messages:list, schema_model: Type[BaseModel] = None):
-        max_retries = 3
-        retries = 0
-        timeout = 300  # Timeout set to 5 minutes (300 seconds)
-
-        while retries < max_retries:
+    def execute(self, messages: List[Dict[str, str]], 
+                schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
+        for attempt in range(self.config.max_retries):
             try:
-                if schema_model:
-                    completion = self.client.chat(
-                        model=self.client_model,
-                        messages=messages,
-                        options={"num_ctx": 5120, "timeout": timeout},
-                        format=schema_model.model_json_schema(),
-                    )
-                    return schema_model.model_validate_json(completion['message']['content'])
-                else:
-                    completion = self.client.chat(
-                        model=self.client_model,
-                        messages=messages,
-                        options={"num_ctx": 5120, "timeout": timeout},
-                        format=Output.StructureAnswer.model_json_schema(),
-                    )
-                    return Output.StructureAnswer.model_validate_json(completion['message']['content'])
+                completion = self.client.chat(
+                    model=self.client_model,
+                    messages=messages,
+                    options={"num_ctx": 5120, "timeout": self.config.timeout},
+                    format=(schema_model or Output.StructureAnswer).model_json_schema(),
+                )
+                return (schema_model or Output.StructureAnswer).model_validate_json(
+                    completion['message']['content']
+                )
             except Exception as e:
-                retries += 1
-                if retries >= max_retries:
+                if attempt == self.config.max_retries - 1:
                     raise e
-                # Optionally log the exception
-                print(f"Attempt {retries} failed: {e}")
+                logger.warning(f"Attempt {attempt + 1} failed: {e}")
 
     def close(self):
         """
@@ -351,35 +354,23 @@ class QwenModel(LModel):
             raise ValueError("init qwen failed")
         self.client_model = client_model
 
-    def execute(self, messages: list, schema_model: Type[BaseModel] = None):
-        max_retries = 3
-        retries = 0
-        timeout = 300  # Timeout set to 5 minutes (300 seconds)
-
-        while retries < max_retries:
+    def execute(self, messages: List[Dict[str, str]], 
+                schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
+        for attempt in range(self.config.max_retries):
             try:
-                if schema_model:
-                    completion = self.client.chat(
-                        model=self.client_model,
-                        messages=messages,
-                        options={"num_ctx": 5120, "timeout": timeout},
-                        format=schema_model.model_json_schema(),
-                    )
-                    return schema_model.model_validate_json(completion['message']['content'])
-                else:
-                    completion = self.client.chat(
-                        model=self.client_model,
-                        messages=messages,
-                        options={"num_ctx": 5120, "timeout": timeout},
-                        format=Output.StructureAnswer.model_json_schema(),
-                    )
-                    return Output.StructureAnswer.model_validate_json(completion['message']['content'])
+                completion = self.client.chat(
+                    model=self.client_model,
+                    messages=messages,
+                    options={"num_ctx": 5120, "timeout": self.config.timeout},
+                    format=(schema_model or Output.StructureAnswer).model_json_schema(),
+                )
+                return (schema_model or Output.StructureAnswer).model_validate_json(
+                    completion['message']['content']
+                )
             except Exception as e:
-                retries += 1
-                if retries >= max_retries:
+                if attempt == self.config.max_retries - 1:
                     raise e
-                # Optionally log the exception
-                print(f"Attempt {retries} failed: {e}")
+                logger.warning(f"Attempt {attempt + 1} failed: {e}")
 
     def close(self):
         """
@@ -401,43 +392,33 @@ class QwenModel(LModel):
 class DeepseekModel(LModel):
     def __init__(self, client_model):
         LModel.__init__(self)
-        load_dotenv()
+        api_key = get_api_key("DEEPSEEK")
+        if not api_key:
+            raise ValueError("Deepseek API key not found in environment variables")
         try:
-            self.client = OpenAI(api_key=os.getenv('DEEPSEEK'),
-                                                        base_url="https://api.deepseek.com")
+            self.client = OpenAI(api_key=api_key,
+                               base_url="https://api.deepseek.com")
         except Exception as e:
             logger.warning(f"init deepseek failed: {e}")
             raise ValueError("init deepseek failed")
         self.client_model = client_model
 
-    def execute(self, messages:list, schema_model: Type[BaseModel] = None):
-        max_retries = 3
-        retries = 0
-
-        while retries < max_retries:
+    def execute(self, messages: List[Dict[str, str]], 
+                schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
+        for attempt in range(self.config.max_retries):
             try:
-                if schema_model:
-                    tmp_agent = instructor.from_openai(self.client,mode=instructor.Mode.JSON)
-                    completion = tmp_agent.chat.completions.create(
-                        model=self.client_model, messages=messages,
-                        response_model=schema_model,
-                        timeout=300
-                    )
-                else:
-                    tmp_agent = instructor.from_openai(self.client, mode=instructor.Mode.JSON)
-                    completion = tmp_agent.chat.completions.create(
-                        model=self.client_model,
-                        messages=messages,
-                        timeout=300,
-                        response_model=Output.StructureAnswer
-                    )
+                tmp_agent = instructor.from_openai(self.client, mode=instructor.Mode.JSON)
+                completion = tmp_agent.chat.completions.create(
+                    model=self.client_model,
+                    messages=messages,
+                    response_model=schema_model or Output.StructureAnswer,
+                    timeout=self.config.timeout
+                )
                 return completion
             except Exception as e:
-                retries += 1
-                if retries >= max_retries:
+                if attempt == self.config.max_retries - 1:
                     raise e
-                # Optionally log the exception
-                logger.warning(f"Attempt {retries} failed: {e}")
+                logger.warning(f"Attempt {attempt + 1} failed: {e}")
 
     def close(self):
         self.client.close()

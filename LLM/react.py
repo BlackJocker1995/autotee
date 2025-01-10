@@ -1,8 +1,6 @@
-import inspect
-from typing import Type
-
+from typing import Type, Optional, Dict, Any
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from LLM.action import Scenario
 from LLM.llmodel import LModel
@@ -10,67 +8,52 @@ from LLM.output import Output
 from a4test.test_assistance import timing_decorator
 from static.projectUtil import truncate_string
 
+class ReactConfig(BaseModel):
+    """Configuration for ReAct model."""
+    max_turns: int = Field(default=20, description="Maximum number of turns")
+    max_retries: int = Field(default=3, description="Maximum number of retries")
+    logging_enabled: bool = Field(default=True, description="Enable detailed logging")
 
-class LModelReAct():
-    """
-    ReAct policy
-    """
+class LModelReAct:
+    """ReAct (Reasoning + Acting) policy implementation."""
+
     REACT_PROMPT_TEMPLATE = """
     You run in a thought, action, observation loop.
     At the end of the loop you output an Answer.
     Use thought to describe your thoughts about the question you have been asked.
     
-    The <action> you can only choose from:
-    
+    Available actions:
     {methods_name}
     
-    Their definition are:
-    
+    Action definitions:
     {methods_doc}
 
-    Your output should be a string in json format.
-    The json format that the output needs to follow:
+    Output format:
     {output_schema}
-    
-    where
-    - thought: you should always think about what to do.
-    - action: the function to take, should be one of the available actions, when you get an answer.
-    - argument: the arguments you need to perform the function.
-    - consistent: Unless verified through verify_output_consistency and evident is provided, it will always remain False.
-    When you think you have found the answer, do not output actions, but output answer.
-    Your output will be directly parsed as a json string, so make sure your output is a valid json string, it must be in str format.
-    Your output will be used to create an LLMOutput object using LLMOutput.model_validate_json
-    Using None instead of null or "null".
-    Please note that your output will be parsed directly.
-    If the format is incorrect, the parsing will fail and you will be severely criticized.
-    Perform one operation at a time in each output, do not include multiple operations in one output.
     """
 
-    def __init__(self, env_class: Type[Scenario]):
-        """Initialize ReAct model with environment class.
+    def __init__(self, env_class: Type[Scenario], config: Optional[ReactConfig] = None):
+        """Initialize ReAct model with environment class and configuration.
         
         Args:
-            env_class (Type[Scenario]): The scenario class containing available actions
+            env_class: Scenario class containing available actions
+            config: Optional configuration settings
         """
-        self.actions = None
-        self.candidate = None
         self.env_class = env_class
-        self.code_dynamic = None
-        self.methods_name, self.methods_structure = env_class.get_class_method_info()
-
-        self.react_prompt = self.REACT_PROMPT_TEMPLATE.format(
-            methods_name="\n".join(self.methods_name),
-            methods_doc="\n".join(self.methods_structure),
+        self.config = config or ReactConfig()
+        self.methods_name, self.methods_docs = env_class.get_class_method_info()
+        self.react_prompt = self._build_prompt()
+        
+    def _build_prompt(self) -> str:
+        """Build the formatted system prompt."""
+        return self.REACT_PROMPT_TEMPLATE.format(
+            methods_name="\n".join(f"- {name}" for name in self.methods_name),
+            methods_doc="\n".join(self.methods_docs),
             output_schema=Output.ReactOutputForm.model_json_schema()
         ).strip()
-        # - observation: the result of action
-        # self.model_agent.messages_memary.append({"role": "system", "content": self.react_prompt})
-
 
     def candidate_dict(self, block):
         self.candidate = block
-
-
 
 def extract_json(text: str):
     """
@@ -97,14 +80,22 @@ def extract_json(text: str):
     except Exception as e:
         return f"Error extracting JSON: {e}"
 
-
 class ReActModel(LModelReAct):
-    def __init__(self, env_class:type[Scenario], client_model:str, **arguments):
-        super().__init__(env_class)
+    """Implementation of ReAct model with specific LLM backend."""
+    
+    def __init__(self, env_class: Type[Scenario], client_model: str, 
+                 config: Optional[ReactConfig] = None, **kwargs: Dict[str, Any]):
+        """Initialize ReAct model with specific configuration.
+        
+        Args:
+            env_class: Scenario class containing available actions
+            client_model: Name of the LLM client to use
+            config: Optional ReAct configuration
+            **kwargs: Additional arguments passed to action initialization
+        """
+        super().__init__(env_class, config)
         self.agent = LModel.class_generator(client_model)
-
-        # action_object
-        self.action_object = env_class.Actions(**arguments)
+        self.action_object = env_class.Actions(**kwargs)
 
     def get_short_name(self):
         return self.agent.get_short_name()
@@ -123,74 +114,78 @@ class ReActModel(LModelReAct):
             self.agent.messages_memary.append({"role": "assistant", "content": result.model_dump_json()})
         return result
 
-    def infer_react(self, question:str, max_turns=20) -> int:
-        # Initialize attempt counter
+    def infer_react(self, question: str) -> int:
+        """Run the ReAct inference loop.
+        
+        Args:
+            question: Initial question to process
+            
+        Returns:
+            Number of turns taken or -1 if max_turns reached
+        
+        Raises:
+            ValueError: If invalid action or argument received
+        """
         attempt = 0
-        # Set the initial prompt to the question
         next_prompt = question
-        # Get the current size of the messages memory
-        top_index = len(self.agent.messages_memary)
+        messages_start = len(self.agent.messages_memory)
 
-        # Loop until the maximum number of turns is reached
-
-        while attempt < max_turns:
-            # Increment the attempt counter
+        while attempt < self.config.max_turns:
             attempt += 1
-
-            # If more than two attempts, remove the last two messages from memory
-            if attempt > 2 and len(self.agent.messages_memary) > top_index:
-                self.agent.messages_memary.pop(top_index)
-                self.agent.messages_memary.pop(top_index)
-
-            # Query the model with the current prompt
-            llm_output = self.query_json_react(next_prompt)
-
-            # If no output is received, continue to the next iteration
-            if llm_output is None:
+            
+            # Cleanup old messages if needed
+            if attempt > 2:
+                self._cleanup_messages(messages_start)
+                
+            # Get next action
+            llm_output = self._get_next_action(next_prompt)
+            if not llm_output:
                 continue
-
-            self._log_attempt(attempt, llm_output)
-
-            # If the output is consistent, return the attempt count
-            if llm_output.consistent and llm_output.action is None:
+                
+            # Process output
+            if self._is_final_answer(llm_output):
                 return attempt
-
-            # Check if the action is known
-            if llm_output.action not in self.methods_name:
-                next_prompt = self._handle_unknown_action(llm_output)
-                continue
-
-            # Log and execute the action
-            logger.info(truncate_string("Running {}({})".format(llm_output.action, llm_output.argument)))
+                
+            # Execute action and get next prompt    
             try:
-                # Retrieve the method corresponding to the action
-                action_func = getattr(self.action_object, llm_output.action)
-                # Execute the method with the provided argument
-                if llm_output.argument is not None:
-                    #if isinstance(llm_output.argument, str):
-                    observation = action_func(llm_output.argument)
-                    # else:
-                    #     observation = action_func(eval(llm_output.argument))
-                else:
-                    observation = action_func()
-
+                next_prompt = self._execute_action(llm_output)
             except Exception as e:
-                # Log any exceptions that occur during method execution
-                logger.warning(f"Some Error, fail to call the function as {e}. "
-                               f"The signature of function is {inspect.signature(action_func)}.")
-                # Update the prompt with the error observation
-                next_prompt = (f"Observation: Some Error, fail to call the function as {e}. "
-                               f"The signature of function is {inspect.signature(action_func)}.")
-                # attempt -= 1
-                continue
-
-            # Log the observation and update the prompt
-            logger.debug("Observation: {}...\n".format(observation))
-            logger.info(truncate_string("Observation: {}...\n".format(observation)))
-            next_prompt = "Observation: {}".format(observation)
-
-        # Return -1 if the maximum number of turns is reached without a consistent output
+                next_prompt = self._handle_action_error(e, llm_output)
+                
         return -1
+
+    def _get_next_action(self, prompt: str) -> Optional[Output.ReactOutputForm]:
+        """Get next action from LLM."""
+        try:
+            return self.query_json_react(prompt)
+        except Exception as e:
+            logger.error(f"Failed to get next action: {e}")
+            return None
+
+    def _is_final_answer(self, output: Output.ReactOutputForm) -> bool:
+        """Check if output represents final answer."""
+        return output.consistent and output.action is None
+
+    def _execute_action(self, output: Output.ReactOutputForm) -> str:
+        """Execute action and return observation."""
+        if output.action not in self.methods_name:
+            return self._handle_unknown_action(output)
+            
+        action_func = getattr(self.action_object, output.action)
+        observation = self._call_action(action_func, output.argument)
+        
+        return f"Observation: {observation}"
+
+    def _call_action(self, func: Any, argument: Any) -> Any:
+        """Call action function with argument."""
+        if argument is not None:
+            return func(argument)
+        return func()
+
+    def _cleanup_messages(self, start_index: int) -> None:
+        """Clean up old messages."""
+        while len(self.agent.messages_memory) > start_index:
+            self.agent.messages_memory.pop(start_index)
 
     def _log_attempt(self, attempt: int, llm_output: Output.ReactOutputForm) -> None:
         """Log details of the current attempt.
@@ -218,3 +213,17 @@ class ReActModel(LModelReAct):
         ))
         return (f"Action Error - Unknown action: {llm_output.action}. "
                 f"You can only choose from {self.env_class.get_class_method_info()[0]}")
+
+    def _handle_action_error(self, error: Exception, output: Output.ReactOutputForm) -> str:
+        """Handle action execution error and return updated prompt.
+        
+        Args:
+            error (Exception): Exception raised during action execution
+            output (Output.ReactOutputForm): Output containing action details
+            
+        Returns:
+            str: Updated prompt with error message
+        """
+        logger.warning(f"Error executing action {output.action}: {error}")
+        return (f"Observation: Error executing action {output.action}: {error}. "
+                f"The signature of function is {inspect.signature(getattr(self.action_object, output.action))}.")

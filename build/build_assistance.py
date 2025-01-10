@@ -1,6 +1,8 @@
 import os
 import shutil
-from typing import Type
+from typing import Type, Optional, List
+from pathlib import Path
+from dataclasses import dataclass, field
 
 from loguru import logger
 from .conversion_examples import JAVA_CONVERSION_EXAMPLES, PYTHON_CONVERSION_EXAMPLES
@@ -16,19 +18,25 @@ from static.code_match import PythonCode
 from static.get_env import return_env
 from static.projectUtil import list_directories, copy_directory
 
+@dataclass
+class ConversionConfig:
+    """Configuration for code conversion process"""
+    source_language: str
+    target_language: str = "rust"
+    examples: List[str] = field(default_factory=list)
+    agent_model: Optional[str] = None
 
 class TestAssistance:
-    def __init__(self, language:str):
-        self.language = language
-        self.exec = ""
-        self.test_file_name = ""
-        self.convert_example_str_list:list[str] = [""]
-        self.code_dynamic:CodeDynamic = CodeDynamic.class_generator(self.language)
-
-    def set_project_path(self, project_path:str):
+    """Base class for language-specific test assistance"""
+    
+    def __init__(self, config: ConversionConfig):
+        self.config = config
+        self.code_dynamic = CodeDynamic.class_generator(config.source_language)
+        
+    def set_project_path(self, project_path: str):
         self.code_dynamic.project_path = project_path
 
-    def set_project_name(self, project_name:str):
+    def set_project_name(self, project_name: str):
         self.code_dynamic.project_name = project_name
 
     def list_source_project(self, project_path):
@@ -36,45 +44,44 @@ class TestAssistance:
 
         # List all directories within the specified path
         dirs = list_directories(code_file_path)
-        return [it for it in dirs if f"_{self.language}" in it]
+        return [it for it in dirs if f"_{self.config.source_language}" in it]
 
-    def _add_test_cases(self, agent, project_path, overwrite, is_multiple=False):
+    def _add_test_cases(self, agent: LModel, 
+                       project_path: Path,
+                       overwrite: bool, 
+                       is_multiple: bool = False) -> None:
+        """Add test cases to project
+        
+        Args:
+            agent: Language model agent
+            project_path: Project directory path
+            overwrite: Whether to overwrite existing tests
+            is_multiple: Whether to generate multiple test cases
         """
-        Base method for adding test cases
-        :param agent: LLM agent instance
-        :param project_path: Path to project directory
-        :param overwrite: Whether to overwrite existing test files
-        :param is_multiple: Whether to add multiple test cases
-        :return: None
-        """
-        dirs = self.list_source_project(project_path)
-        for dir_item in dirs:
+        for dir_item in self._get_source_dirs(project_path):
             try:
-                if not f"_{self.exec}" in dir_item:
-                    continue
-                
-                logger.debug(f"Processing directory: {dir_item}")
-                path_dir = os.path.join(project_path, "code_file", dir_item)
-                main_file = os.path.join(path_dir, f'main.{self.exec}')
-                test_file = os.path.join(path_dir, f'{self.test_file_name}.{self.exec}')
-
-                if not self._should_process_test_file(test_file, overwrite, main_file):
-                    continue
-
-                agent.re_init_chat()
-                source_code = self._read_source_code(main_file)
-                
-                if is_multiple:
-                    self.code_dynamic.set_project_path(project_path)
-                    result = self.code_dynamic.design_test_mul_cases(agent, source_code)
-                else:
-                    result = self.code_dynamic.design_test_case(agent, source_code)
-                
-                self._write_test_file(test_file, result)
-                
+                self._process_test_dir(dir_item, agent, overwrite, is_multiple)
             except Exception as e:
                 logger.error(f"Error processing {dir_item}: {str(e)}")
-                continue
+
+    def _process_test_dir(self, dir_item: Path,
+                         agent: LModel,
+                         overwrite: bool,
+                         is_multiple: bool) -> None:
+        """Process a single test directory"""
+        if not self._should_process_dir(dir_item):
+            return
+            
+        path_dir = dir_item / "code_file"
+        main_file = path_dir / f"main.{self.config.source_language}"
+        test_file = path_dir / f"test.{self.config.source_language}"
+        
+        if not self._should_process_test_file(test_file, overwrite, main_file):
+            return
+            
+        source_code = self._read_source_code(main_file)
+        result = self._generate_test_cases(agent, source_code, is_multiple)
+        self._write_test_file(test_file, result)
 
     def _should_process_test_file(self, test_file, overwrite, main_file):
         """Check if test file should be processed"""
@@ -172,11 +179,11 @@ class TestAssistance:
 
         # List all directories within the specified path
         dirs = list_directories(code_file_path)
-        dirs = [it for it in dirs if it.endswith(f"_{self.language}")]
+        dirs = [it for it in dirs if it.endswith(f"_{self.config.source_language}")]
         for dir_item in dirs:
             logger.info(f"Switch to {dir_item}.")
             # Skip directories that do not contain "_" in their name
-            if not f"_{self.language}" in dir_item:
+            if not f"_{self.config.source_language}" in dir_item:
                 continue
 
             # Extract a hash index from the directory name for naming Rust files
@@ -192,7 +199,7 @@ class TestAssistance:
 
             # Check if the main Java file exists; if not, log a warning and skip
             if not os.path.exists(test_file):
-                logger.warning(f"Main {self.language} file does not exist, finish previous step first!")
+                logger.warning(f"Main {self.config.source_language} file does not exist, finish previous step first!")
                 continue
 
             # Open and read the Java main file
@@ -232,7 +239,7 @@ class TestAssistance:
             rust_path_dir = os.path.join(code_file_path, basename)
             rust_lib_file = os.path.join(rust_path_dir, 'tee', 'src', 'lib.rs')
             rust_main_file = os.path.join(rust_path_dir, 'tee', 'src', 'main.rs')
-            test_file = os.path.join(code_file_path, f"{hash_index}_{self.language}", f'{self.test_file_name}.{self.exec}')
+            test_file = os.path.join(code_file_path, f"{hash_index}_{self.config.source_language}", f'{self.test_file_name}.{self.exec}')
             failed_path_dir = os.path.join(code_file_path, f"{basename}_failed")
 
             if os.path.exists(failed_path_dir) or (not overwrite and os.path.exists(rust_main_file)):
@@ -283,18 +290,33 @@ class TestAssistance:
             target_rust.build_target()
 
     def _react_convert_build_test(self, code, path_dir, agent_model) -> int:
+        """
+        Convert, build, and test the given code using a ReAct model.
+
+        :param code: The source code to be converted
+        :param path_dir: The directory path of the source code
+        :param agent_model: The agent model to be used
+        :return: An integer indicating the success (-1) or failure (other values) of the process
+        """
+        # Get the path for the Rust project
         rust_project_path = self._get_rust_project_path(agent_model)
+        
+        # Create a ReAct model instance
         model = self._create_react_model(path_dir, rust_project_path, agent_model)
         
+        # Analyze the source code and add conversion examples
         if not self._analyze_code(model, code):
             return -1
-            
+        
+        # Convert the source code to Rust
         rust_code, rust_dependency = self._convert_code_to_rust(model, code)
         if rust_code is None:
             return -1
-            
+        
+        # Set up the Rust project with the converted code
         self._setup_rust_project(rust_project_path, rust_code)
         
+        # Verify if the Rust code builds successfully
         return self._verify_build_success(model, rust_code)
 
     def _get_rust_project_path(self, agent_model) -> str:
@@ -307,7 +329,7 @@ class TestAssistance:
         return ReActModel(
             env_class=CodeConvertBuildTestScenario,
             client_model=agent_model,
-            language=self.language,
+            language=self.config.source_language,
             source_project_path=path_dir,
             rust_project_path=rust_project_path
         )
@@ -320,8 +342,8 @@ class TestAssistance:
         model.agent.add_message(
             "user", 
             CodeConvertBuildTestScenario.prompt_convert_example(
-                self.language,
-                self.convert_example_str_list
+                self.config.source_language,
+                self.config.examples
             )
         )
         return True
@@ -351,7 +373,7 @@ class TestAssistance:
     def _verify_build_success(self, model, rust_code) -> int:
         """Verify if the Rust code builds successfully"""
         qus_result = model.infer_react(
-            question=CodeBuildScenario.convert_and_build_prompt(rust_code)
+            question=CodeConvertBuildTestScenario.prompt_convert_and_build_prompt(rust_code)
         )
         
         if qus_result != -1:
@@ -359,43 +381,6 @@ class TestAssistance:
             return qus_result
             
         return -1
-
-    def _react_convert(self, code_react, code):
-        # Analysis function
-        qus_result = code_react.model_agent.query(CodeConvertBuildTestScenario.prompt_code_analysis(code))
-        logger.info(qus_result)
-
-        # for item in self.convert_example_str_list:
-        code_react.model_agent.add_message("user", CodeConvertBuildTestScenario.prompt_convert_example(self.language,
-                                                                                                       self.convert_example_str_list))
-        # Covernt
-        qus_result = code_react.model_agent.query_json(
-            message=f" Implement this code using Rust with same type input and return. ```{code}``` using Rust.",
-            output_format=CodeConvertScenario.RustCodeFormatWithDep, remember=True)
-
-        code_react.model_agent.messages_memary.pop(2)
-
-        rust_code = qus_result.code
-        rust_dependency = qus_result.dependency
-
-        logger.debug(rust_code)
-        # # Write the Rust code to a new project
-        rust_target = RustDynamic()
-        rust_target.new_project()
-        rust_target.delete_file("main.rs")
-        rust_target.clear_dependencies()
-        rust_target.write_file_code("lib.rs",rust_code)
-        rust_target.update_dependency(rust_dependency)
-        logger.info(rust_dependency)
-
-        qus_result = code_react.infer_react(question=CodeBuildScenario.convert_and_build_prompt(rust_code),
-                                            output_format=CodeBuildScenario.ReactOutputForm)
-        if "Get answer" in qus_result:
-            logger.info(qus_result)
-        else:
-            return False
-
-        return True
 
     def _rust_test_add(self, codescan: Type[LModel], rust_code: str, code: str = "") -> str:
         logger.debug(rust_code)
@@ -407,7 +392,7 @@ class TestAssistance:
         codescan.add_message('user', message)
 
         if code != "":
-            message = f"This is its main fucntino in {self.language} version: ```{code}```"
+            message = f"This is its main fucntino in {self.config.source_language} version: ```{code}```"
             codescan.add_message('user', message)
 
         main_code = codescan.query_json(message=f"Code: ```{rust_code}```",
@@ -430,70 +415,27 @@ class TestAssistance:
             "python": PythonTestAssistance
         }
         # Return an instance of the appropriate subclass, initialized with the language
-        return class_dict[language](language)
+        return class_dict[language](ConversionConfig(language))
 
 class JavaTestAssistance(TestAssistance):
 
-    def __init__(self, language):
-        super().__init__(language)
+    def __init__(self, config: ConversionConfig):
+        super().__init__(config)
         self._init_java_config()
         
     def _init_java_config(self):
         """Initialize Java-specific configuration"""
         self.exec = "java"
         self.test_file_name = "Test"
-        self.convert_example_str_list = JAVA_CONVERSION_EXAMPLES
+        self.config.examples = JAVA_CONVERSION_EXAMPLES
 
 class PythonTestAssistance(TestAssistance):
-    def __init__(self,language:str):
-        super().__init__(language)
+    def __init__(self, config: ConversionConfig):
+        super().__init__(config)
         self._init_python_config()
         
     def _init_python_config(self):
         """Initialize Python-specific configuration"""
         self.exec = "py"
         self.test_file_name = "test"
-        self.convert_example_str_list = PYTHON_CONVERSION_EXAMPLES
-
-    def design_test_file(self, codescan, source_code):
-        message = """
-              You are a Python programmer. 
-              I will provide you with a code snippet. 
-              Please generate a main function to transform this code into a fully executable program.
-              Please remember to import the necessary dependencies. 
-              If a key is required, please make an attempt to provide one in the corresponding format.
-              If a key is involved, you must provide an authentic one.
-              And if there needs any token, seed, init_str, use "test".
-
-              Only return the code. 
-              """
-        codescan.add_message("system", message)
-
-        main_code = codescan.query_json("The function code is: " + source_code, CodeBuildScenario.CodeFormat)
-        main_code = main_code.code
-
-        return main_code
-
-    def test_file_build(self, path_dir: str):
-        env = return_env()
-        if os.path.exists(os.path.join(path_dir, "can.text")):
-            return
-        codescan = OpenAIModel("gpt-4o")
-
-        with open(os.path.join(path_dir, "test.py"), "r", encoding="utf-8") as f:
-            code = f.read()
-
-        output = PythonCode.test_build(path_dir, env=env)
-        if ", line" in output:
-            logger.info(path_dir)
-            result = codescan.query_json(code + f"\n {output}", CodeConvertScenario.CodeFormat)
-            with open(os.path.join(path_dir, "test.py"), "w", encoding="utf-8") as f:
-                f.write(result.code)
-
-        output = PythonCode.test_build(path_dir, env=env)
-        if ", line" in output:
-            # raise ValueError(path_dir)
-            shutil.rmtree(path_dir)
-
-        with open(os.path.join(path_dir, "can.text"), "w", encoding="utf-8") as f:
-            f.write("")
+        self.config.examples = PYTHON_CONVERSION_EXAMPLES
