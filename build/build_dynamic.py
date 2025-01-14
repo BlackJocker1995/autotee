@@ -3,24 +3,34 @@ import re
 import shutil
 import subprocess
 from abc import abstractmethod
+from dataclasses import dataclass
+from typing import Optional, Dict, Type
 
 import pexpect
 from loguru import logger
 
 from LLM.llmodel import LModel, OpenAIModel
 from LLM.output import Output
-from LLM.scenarios.generatve_one_test_case import GenerateOneTestCaseScenario, GenerateMulTestCaseScenario
 from static.get_env import return_env
 
+
+@dataclass
+class BuildConfig:
+    """Configuration for build process"""
+    language: str
+    exec_extension: str
+    test_file_name: str
+    project_path: Optional[str] = None
+    project_name: Optional[str] = None
 
 
 class CodeDynamic:
     """Base class for dynamic code building and testing across multiple languages.
-    
+
     This class provides core functionality for building, testing, and modifying code
     projects in various programming languages. It serves as an abstract base class
     that language-specific implementations (Java, Python, Rust) inherit from.
-    
+
     Attributes:
         env (dict): Environment variables for the build process
         languages (str): Target programming language
@@ -28,29 +38,23 @@ class CodeDynamic:
         test_file_name (str): Default name for test files
         project_path (str): Path to the project directory
     """
-    
-    env = return_env()
-    # Add or modify environment variables
-    env['PATH'] = os.getenv('WORKPATH') + env.get('PATH', '')
-    
-    def __init__(self, project_path: str = None):
+
+    def __init__(self, config: BuildConfig):
         """Initialize the CodeDynamic instance.
-        
+
         Args:
-            project_path (str, optional): Path to the project directory. Defaults to None.
+            config (BuildConfig): Configuration for the build process
         """
+        self.config = config
+        self._init_environment()
+
+    def _init_environment(self) -> None:
+        """Initialize build environment"""
         self.env = return_env()
-        # Add or modify environment variables
         self.env['PATH'] = os.getenv('WORKPATH') + self.env.get('PATH', '')
 
-        self.languages = ""
-        self.exec = ""
-        self.test_file_name = ""
-
-        self.project_path = project_path
-
     @abstractmethod
-    def build_target(self, target_file:str):
+    def build_target(self, target_file: str):
         """Build the specified target file.
 
         :param target_file: Path to the target file to build
@@ -72,7 +76,7 @@ class CodeDynamic:
         pass
 
     @abstractmethod
-    def compile_project(self, path_dir:str, file_name:str) -> str:
+    def compile_project(self, path_dir: str, file_name: str) -> str:
         """Compile the project at the specified path.
 
         :param path_dir: Directory containing project files
@@ -85,7 +89,7 @@ class CodeDynamic:
         pass
 
     @abstractmethod
-    def is_build_target_exit(self, file_name:str) -> bool:
+    def is_build_target_exit(self, file_name: str) -> bool:
         """Check if build target exists.
 
         :param file_name: Name of file to check
@@ -108,8 +112,8 @@ class CodeDynamic:
         :raises Exception: If command execution fails
         """
         try:
-            cmd = ' '.join(cmd)
-            child = pexpect.spawn(cmd, env=cls.env, cwd=exe_env, timeout=30, encoding='utf-8')
+            # Keep command as list to avoid bytes argument warning
+            child = pexpect.spawn(cmd[0], args=cmd[1:], cwd=exe_env, timeout=30, encoding='utf-8')
             # Wait for the command to finish
             child.expect(pexpect.EOF)
             out_text = child.before
@@ -130,7 +134,7 @@ class CodeDynamic:
         except Exception as e:
             return f"Running error: {e}"
 
-    def read_file_code(self, file_name:str) -> str:
+    def read_file_code(self, file_name: str) -> str:
         """Read and return the contents of a file.
 
         :param file_name: Name of file to read
@@ -139,10 +143,10 @@ class CodeDynamic:
         :rtype: str
         :raises IOError: If file cannot be read
         """
-        with open(os.path.join(self.project_path, file_name), "r", encoding="utf-8") as f:
+        with open(os.path.join(self.config.project_path, file_name), "r", encoding="utf-8") as f:
             return f.read()
 
-    def write_file_code(self, file_name:str, code:str):
+    def write_file_code(self, file_name: str, code: str):
         """Write code to a file.
 
         :param file_name: Name of file to write to
@@ -151,16 +155,16 @@ class CodeDynamic:
         :type code: str
         :raises IOError: If file cannot be written
         """
-        with open(os.path.join(self.project_path, file_name), "w", encoding="utf-8") as f:
+        with open(os.path.join(self.config.project_path, file_name), "w", encoding="utf-8") as f:
             f.write(code)
 
-    def set_project_path(self, project_path:str):
+    def set_project_path(self, project_path: str):
         """Set the project working directory.
 
         :param project_path: Path to set as project directory
         :type project_path: str
         """
-        self.project_path = project_path
+        self.config.project_path = project_path
 
     def delete_file(self, file: str) -> None:
         """Delete a file from the project's source directory.
@@ -170,7 +174,7 @@ class CodeDynamic:
         :raises PermissionError: If lacking permissions to delete file
         :raises OSError: For other file system errors
         """
-        file_path = os.path.join(self.project_path, self.project_name, "src", f"{file}")
+        file_path = os.path.join(self.config.project_path, self.config.project_name, "src", f"{file}")
 
         # Check if the file exists before attempting to delete it
         if os.path.exists(file_path):
@@ -178,48 +182,48 @@ class CodeDynamic:
         else:
             print(f"The file {file} does not exist and cannot be deleted.")
 
-    def design_test_case(self, agent:LModel, code) -> str:
-        """Generate a single test case using an LLM agent.
+    # def design_test_case(self, agent:LModel, code) -> str:
+    #     """Generate a single test case using an LLM agent.
+    #
+    #     :param agent: Language model agent to generate test case
+    #     :type agent: LModel
+    #     :param code: Code to generate test case for
+    #     :type code: str
+    #     :returns: Generated test case code
+    #     :rtype: str
+    #     """
+    #     scenario = GenerateOneTestCaseScenario.class_generator(self.config.language)
+    #
+    #     agent.add_message("system", scenario.one_case_system_prompt(f"{self.config.language}"))
+    #
+    #     out_code = agent.query_json(message=scenario.query_prompt(code),
+    #                                 output_format=Output.OutputCodeFormat)
+    #     out_code = out_code.code
+    #
+    #     return out_code
+    #
+    # def design_test_mul_cases(self, agent:LModel, code) -> list[str]:
+    #     """Generate multiple test cases using an LLM agent.
+    #
+    #     :param agent: Language model agent to generate test cases
+    #     :type agent: LModel
+    #     :param code: Code to generate test cases for
+    #     :type code: str
+    #     :returns: List of generated test case codes
+    #     :rtype: list[str]
+    #     """
+    #     scenario = GenerateMulTestCaseScenario.class_generator(self.config.language)
+    #
+    #     agent.add_message("system", scenario.mul_case_system_prompt(f"{self.config.language}"))
+    #
+    #     out_codes = agent.query_json(message=scenario.query_prompt(code),
+    #                                 output_format=Output.OutputCodeFormat)
+    #
+    #     out_code_list = out_codes.code
+    #
+    #     return out_code_list
 
-        :param agent: Language model agent to generate test case
-        :type agent: LModel
-        :param code: Code to generate test case for
-        :type code: str
-        :returns: Generated test case code
-        :rtype: str
-        """
-        scenario = GenerateOneTestCaseScenario.class_generator(self.languages)
-
-        agent.add_message("system", scenario.one_case_system_prompt(f"{self.languages}"))
-
-        out_code = agent.query_json(message=scenario.query_prompt(code),
-                                    output_format=Output.OutputCodeFormat)
-        out_code = out_code.code
-
-        return out_code
-
-    def design_test_mul_cases(self, agent:LModel, code) -> list[str]:
-        """Generate multiple test cases using an LLM agent.
-
-        :param agent: Language model agent to generate test cases
-        :type agent: LModel
-        :param code: Code to generate test cases for
-        :type code: str
-        :returns: List of generated test case codes
-        :rtype: list[str]
-        """
-        scenario = GenerateMulTestCaseScenario.class_generator(self.languages)
-
-        agent.add_message("system", scenario.mul_case_system_prompt(f"{self.languages}"))
-
-        out_codes = agent.query_json(message=scenario.query_prompt(code),
-                                    output_format=Output.OutputCodeFormat)
-
-        out_code_list = out_codes.code
-
-        return out_code_list
-
-    def build_test_case(self, agent:LModel, max_rounds = 2):
+    def build_test_case(self, agent: LModel, max_rounds=2):
         """Build and test a test case using an LLM agent.
 
         :param agent: Language model agent to use for test case generation
@@ -230,7 +234,7 @@ class CodeDynamic:
         :returns: None if build fails after max_rounds (project directory will be removed)
         :raises IOError: If unable to read/write test files
         """
-        with open(os.path.join(self.project_path, "Test.java"), "r", encoding="utf-8") as f:
+        with open(os.path.join(self.config.project_path, "Test.java"), "r", encoding="utf-8") as f:
             code = f.read()
 
         for it in range(max_rounds):
@@ -239,13 +243,15 @@ class CodeDynamic:
                 return
             else:
                 result = agent.query_json(code + f"\n {output}", Output.OutputCodeFormat)
-                with open(os.path.join(self.project_path, f"{self.test_file_name}.{self.exec}"), "w", encoding="utf-8") as f:
+                with open(os.path.join(self.config.project_path,
+                                       f"{self.config.test_file_name}.{self.config.exec_extension}"), "w",
+                          encoding="utf-8") as f:
                     f.write(result.code)
 
-        shutil.rmtree(self.project_path)
-        logger.info(f"{self.project_path} failed, rm!")
+        shutil.rmtree(self.config.project_path)
+        logger.info(f"{self.config.project_path} failed, rm!")
 
-    def build_file_with_fix(self, file_name, max_round = 5) -> bool:
+    def build_file_with_fix(self, file_name, max_round=5) -> bool:
         """Attempt to build a file with automatic fixes using an LLM.
 
         :param file_name: Name of the file to build
@@ -267,28 +273,31 @@ class CodeDynamic:
                 return True
             else:
                 logger.info("Try build again.")
-                result = agent.query_json(code + f"{output}, if code use log output, you can change to print", Output.OutputCodeFormat)
-                with open(os.path.join(self.project_path, file_name), "w", encoding="utf-8") as f:
+                result = agent.query_json(code + f"{output}, if code use log output, you can change to print",
+                                          Output.OutputCodeFormat)
+                with open(os.path.join(self.config.project_path, file_name), "w", encoding="utf-8") as f:
                     f.write(result.code)
         return False
 
     @staticmethod
-    def class_generator(language:str, project_path: str = None, project_name: str = None):
+    def class_generator(language: str, project_path: str = None, project_name: str = None):
         class_dict = {
             "java": JavaDynamic,
             "python": PythonDynamic,
             "rust": RustDynamic
         }
-        return class_dict[language](project_path)
+        return class_dict[language](
+            BuildConfig(language=language, exec_extension="", test_file_name="", project_path=project_path,
+                        project_name=project_name))
+
 
 class RustDynamic(CodeDynamic):
 
-    def __init__(self,project_path: str = None, project_name: str = "tee"):
-        super().__init__(project_path)
-        self.project_name = project_name
-        self.languages = "rust"
-        self.exec = "rs"
-        self.test_file_name = "test"
+    def __init__(self, config: BuildConfig):
+        super().__init__(config)
+        self.config.language = "rust"
+        self.config.exec_extension = "rs"
+        self.config.test_file_name = "test"
 
     def modify_judgment(self, result) -> bool:
         pass
@@ -297,7 +306,7 @@ class RustDynamic(CodeDynamic):
         pass
 
     def is_build_target_exit(self, file_name) -> bool:
-        target = os.path.join(self.project_name, self.project_name, "src", file_name)
+        target = os.path.join(self.config.project_name, self.config.project_name, "src", file_name)
         return os.path.exists(target)
 
     def clear_dependencies(self):
@@ -317,7 +326,7 @@ class RustDynamic(CodeDynamic):
         """
         try:
             # Open the Cargo.toml file for reading
-            with open(os.path.join(self.project_path, self.project_name, 'Cargo.toml'), 'r') as file:
+            with open(os.path.join(self.config.project_path, self.config.project_name, 'Cargo.toml'), 'r') as file:
                 lines = file.readlines()
 
             # Find the [dependencies] section
@@ -334,19 +343,20 @@ class RustDynamic(CodeDynamic):
             lines = lines[:dependencies_index + 1]
 
             # Write the truncated lines back to the file
-            with open(os.path.join(self.project_path, self.project_name, 'Cargo.toml'), 'w') as file:
+            with open(os.path.join(self.config.project_path, self.config.project_name, 'Cargo.toml'), 'w') as file:
                 file.writelines(lines)
 
             logger.info("Cleared all dependencies in Cargo.toml.")
             return True
         except FileNotFoundError:
-            logger.warning(f"File {os.path.join(self.project_path, self.project_name, 'Cargo.toml')} not found.")
+            logger.warning(
+                f"File {os.path.join(self.config.project_path, self.config.project_name, 'Cargo.toml')} not found.")
             return False
         except Exception as e:
             logger.warning(f"An error occurred: {e}")
             return False
 
-    def write_file_code(self, file_name:str, code:str) -> None:
+    def write_file_code(self, file_name: str, code: str) -> None:
         """Write code to a file in the Rust project's src directory.
 
         :param file_name: Name of the file to write
@@ -355,7 +365,8 @@ class RustDynamic(CodeDynamic):
         :type code: str
         :raises IOError: If file cannot be written
         """
-        with open(os.path.join(self.project_path, self.project_name, "src", f"{file_name}"), 'w', encoding='utf-8') as f:
+        with open(os.path.join(self.config.project_path, self.config.project_name, "src", f"{file_name}"), 'w',
+                  encoding='utf-8') as f:
             f.write(code)
 
     def read_file_code(self, file_name: str) -> str:
@@ -374,12 +385,13 @@ class RustDynamic(CodeDynamic):
          :raises FileNotFoundError: If the specified file does not exist.
          :raises IOError: If an I/O error occurs during file access.
          """
-        with open(os.path.join(self.project_path, self.project_name, "src", f"{file_name}"), 'r', encoding='utf-8') as f:
+        with open(os.path.join(self.config.project_path, self.config.project_name, "src", f"{file_name}"), 'r',
+                  encoding='utf-8') as f:
             code = f.read()
         return code
 
     @staticmethod
-    def split_message(message:str):
+    def split_message(message: str):
         """
           Splits a message into blocks based on a specific format pattern.
 
@@ -413,7 +425,7 @@ class RustDynamic(CodeDynamic):
         :raises Exception: If cargo command fails
         """
         cmd = ["cargo", "new", "--lib", ]
-        self.run_cmd(cmd, exe_env=self.project_path)
+        self.run_cmd(cmd, exe_env=self.config.project_path)
 
     def new_project(self):
         """Create a new Rust binary project.
@@ -423,9 +435,9 @@ class RustDynamic(CodeDynamic):
 
         :raises Exception: If cargo command fails
         """
-        if not os.path.exists(os.path.join(self.project_path,self.project_name)):
-            cmd = ["cargo", "new", self.project_name]
-            self.run_cmd(cmd, exe_env=self.project_path)
+        if not os.path.exists(os.path.join(self.config.project_path, self.config.project_name)):
+            cmd = ["cargo", "new", self.config.project_name]
+            self.run_cmd(cmd, exe_env=self.config.project_path)
 
     def cargo_init(self):
         """Initialize a new Rust project in an existing directory.
@@ -435,8 +447,8 @@ class RustDynamic(CodeDynamic):
 
         :raises Exception: If cargo command fails
         """
-        cmd = ["cargo", "init",  self.project_name]
-        self.run_cmd(cmd, exe_env=os.path.join(self.project_path, self.project_name))
+        cmd = ["cargo", "init", self.config.project_name]
+        self.run_cmd(cmd, exe_env=os.path.join(self.config.project_path, self.config.project_name))
 
     def build_check(self) -> str:
         """Check the Rust project for errors or warnings.
@@ -450,14 +462,14 @@ class RustDynamic(CodeDynamic):
         :raises Exception: If cargo check command fails
         """
         cmd = ["cargo", "check"]
-        output = self.run_cmd(cmd, exe_env=os.path.join(self.project_path, self.project_name))
+        output = self.run_cmd(cmd, exe_env=os.path.join(self.config.project_path, self.config.project_name))
 
         # Find the position of "Checking tee v0.1.0" in the output
         marker = " Checking tee v0.1.0 (/home/rdhan/tmp/"
         marker_index = output.find(marker)
 
         # If the marker is found, remove everything before it
-        if marker_index != -1:
+        if (marker_index != -1):
             output = output[marker_index + len(marker):]
 
         if "Finished `dev` profile" in output and "warning:" not in output:
@@ -465,7 +477,7 @@ class RustDynamic(CodeDynamic):
         else:
             return output
 
-    def build_target(self, target_file:str = "tee") -> str:
+    def build_target(self, target_file: str = "tee") -> str:
         """Build the Rust project using Cargo.
 
         Compiles the specified target binary using cargo build. Checks for successful
@@ -478,7 +490,7 @@ class RustDynamic(CodeDynamic):
         :raises Exception: If cargo build command fails
         """
         cmd = ["cargo", "build", "--bin", target_file]
-        output = self.run_cmd(cmd, exe_env=os.path.join(self.project_path, self.project_name))
+        output = self.run_cmd(cmd, exe_env=os.path.join(self.config.project_path, self.config.project_name))
         if "Finished `dev` profile" in output and "warning:" not in output:
             return "success"
         else:
@@ -494,12 +506,13 @@ class RustDynamic(CodeDynamic):
         :raises FileNotFoundError: If the executable cannot be found
         :raises subprocess.SubprocessError: If execution fails
         """
-        rust_program = os.path.join(self.project_path, self.project_name, "target", "debug", self.project_name)
+        rust_program = os.path.join(self.config.project_path, self.config.project_name, "target", "debug",
+                                    self.config.project_name)
         env = os.environ.copy()
         out = subprocess.run([rust_program], env=env, capture_output=True)
         return out.stdout.decode('utf-8').strip()
 
-    def explain_error_code(self, error_code:str) -> str:
+    def explain_error_code(self, error_code: str) -> str:
         """Explain a Rust compiler error code.
 
         Uses rustc --explain to get detailed information about a specific Rust compiler error.
@@ -511,7 +524,7 @@ class RustDynamic(CodeDynamic):
         :raises Exception: If rustc command fails
         """
         cmd = ["rustc", "--explain", error_code, "| cat"]
-        output = self.run_cmd(cmd, exe_env=os.path.join(self.project_path, self.project_name))
+        output = self.run_cmd(cmd, exe_env=os.path.join(self.config.project_path, self.config.project_name))
         return output
 
     def update_dependency(self, dependencies: list, versions: list = None):
@@ -534,13 +547,13 @@ class RustDynamic(CodeDynamic):
                   or an error occurred during the process.
         :rtype: bool
 
-        :raises ValueError: If no `[dependencies]` section is found in the `Cargo.toml` file.
-        :raises FileNotFoundError: If the `Cargo.toml` file does not exist at the specified path.
+        :raises ValueError: If no [dependencies] section is found in Cargo.toml.
+        :raises FileNotFoundError: If the Cargo.toml file does not exist at the specified path.
         :raises Exception: For any other errors that occur during file operations.
         """
         try:
             # Open the Cargo.toml file for reading
-            with open(os.path.join(self.project_path, self.project_name, 'Cargo.toml'), 'r') as file:
+            with open(os.path.join(self.config.project_path, self.config.project_name, 'Cargo.toml'), 'r') as file:
                 lines = file.readlines()
 
             # Find the [dependencies] section
@@ -555,7 +568,6 @@ class RustDynamic(CodeDynamic):
 
             if versions is None:
                 versions = ['*'] * len(dependencies)
-
 
             # Add or update each dependency from the dictionary
             for dependency_name, version in zip(dependencies, versions):
@@ -575,11 +587,12 @@ class RustDynamic(CodeDynamic):
                     logger.info(f"Added dependency '{dependency_name}' with version '{version}' to Cargo.toml.")
 
             # Write the updated lines back to the file
-            with open(os.path.join(self.project_path, self.project_name, 'Cargo.toml'), 'w') as file:
+            with open(os.path.join(self.config.project_path, self.config.project_name, 'Cargo.toml'), 'w') as file:
                 file.writelines(lines)
             return True
         except FileNotFoundError:
-            logger.warning(f"File {os.path.join(self.project_path, self.project_name, 'Cargo.toml')} not found.")
+            logger.warning(
+                f"File {os.path.join(self.config.project_path, self.config.project_name, 'Cargo.toml')} not found.")
             return False
         except Exception as e:
             logger.warning(f"An error occurred: {e}")
@@ -596,7 +609,7 @@ class RustDynamic(CodeDynamic):
         :rtype: bool
         """
         try:
-            file_path = os.path.join(self.project_path, self.project_name, 'Cargo.toml')
+            file_path = os.path.join(self.config.project_path, self.config.project_name, 'Cargo.toml')
 
             with open(file_path, 'r') as file:
                 lines = file.readlines()
@@ -621,13 +634,14 @@ class RustDynamic(CodeDynamic):
             logger.warning(f"An error occurred: {e}")
             return False
 
+
 class JavaDynamic(CodeDynamic):
 
-    def __init__(self, project_path: str = None):
-        super().__init__(project_path)
-        self.languages = "java"
-        self.exec = "java"
-        self.test_file_name = "Test"
+    def __init__(self, config: BuildConfig):
+        super().__init__(config)
+        self.config.language = "java"
+        self.config.exec_extension = "java"
+        self.config.test_file_name = "Test"
 
     def compile_project(self, path_dir: str, file_name: str) -> str:
         """Compile a Java project.
@@ -653,7 +667,7 @@ class JavaDynamic(CodeDynamic):
         match = re.match(r'(.+).java$', file_name)
         if match:
             name = match.group(1)
-            target = os.path.join(self.project_path, f"{name}.class")
+            target = os.path.join(self.config.project_path, f"{name}.class")
             return os.path.exists(target)
         return False
 
@@ -677,10 +691,10 @@ class JavaDynamic(CodeDynamic):
         :raises Exception: If javac command fails
         """
         cmd = ["javac", target_name]
-        output = self.run_cmd(cmd, exe_env=self.project_path)
+        output = self.run_cmd(cmd, exe_env=self.config.project_path)
         return "success" if output == "" else output
 
-    def build(self, target_file = "Test.java") -> str:
+    def build(self, target_file="Test.java") -> str:
         """Build a Java test file.
 
         :param target_file: Name of the test file to build, defaults to "Test.java"
@@ -690,10 +704,10 @@ class JavaDynamic(CodeDynamic):
         :raises Exception: If javac command fails
         """
         cmd = ["javac", target_file]
-        output = self.run_cmd(cmd, exe_env=os.path.join(self.project_path, self.project_name))
+        output = self.run_cmd(cmd, exe_env=os.path.join(self.config.project_path, self.config.project_name))
         return "success" if output == "" else output
 
-    def execute(self, target_file:str = None) -> str:
+    def execute(self, target_file: str = None) -> str:
         """Execute a compiled Java program.
 
         :param target_file: Name of the class file to execute, defaults to test file name
@@ -704,16 +718,88 @@ class JavaDynamic(CodeDynamic):
         :raises subprocess.SubprocessError: If execution fails
         """
         if not target_file:
-            target_file = self.test_file_name
+            target_file = self.config.test_file_name
         env = CodeDynamic.env
-        env['CLASSPATH'] = self.project_path
+        env['CLASSPATH'] = self.config.project_path
         out = subprocess.run(['java', target_file], env=env, capture_output=True)
         return out.stdout.decode('utf-8').strip()
+
+    def run_coverage(self) -> float:
+        """Run JaCoCo coverage analysis on Java test file.
+
+        :returns: Coverage percentage as float, or -1 if analysis fails
+        :rtype: float
+        """
+        try:
+            # 1. Compile Java files
+            logger.info("Compiling Java files...")
+            if self.build_target("Test.java") != "success":
+                return -1
+
+            # 2. Run program with JaCoCo agent
+            logger.info("\nRunning with JaCoCo agent...")
+            jacoco_exec = "jacoco.exec"
+            subprocess.run([
+                'java',
+                f'-javaagent:{os.environ.get("JACOCO_AGENT")}=destfile={jacoco_exec}',
+                'Test'
+            ], check=True, env=self.env, cwd=self.config.project_path)
+
+            # 3. Generate report
+            logger.info("\nGenerating coverage report...")
+            report_dir = "coverage-report"
+            subprocess.run([
+                'java', '-jar', os.environ.get('JACOCO_CLI'),
+                'report', jacoco_exec,
+                '--classfiles', '.',
+                '--sourcefiles', '.',
+                '--html', report_dir,
+                '--xml', 'coverage.xml'
+            ], check=True, env=self.env, cwd=self.config.project_path)
+
+            # 4. Parse and display results
+            logger.info("\nLine Coverage Results:")
+            logger.info("=" * 60)
+
+            tree = ET.parse(os.path.join(self.config.project_path, 'coverage.xml'))
+            root = tree.getroot()
+
+            # Find coverage data for Test class
+            test_class = root.find('.//class[@name="Test"]')
+            if test_class is not None:
+                counter = test_class.find('./counter[@type="LINE"]')
+                if counter is not None:
+                    missed = int(counter.get('missed', 0))
+                    covered = int(counter.get('covered', 0))
+                    total = missed + covered
+                    coverage = (covered / total) * 100 if total > 0 else 0
+
+                    logger.info(f"Coverage Summary for Test.java:")
+                    logger.info(f"Line Coverage: {coverage:.2f}%")
+                    logger.info(f"Total Lines: {total}")
+                    logger.info(f"Covered Lines: {covered}")
+                    logger.info(f"Missed Lines: {missed}")
+
+                    logger.info(f"\nDetailed report available at: {report_dir}/index.html")
+                    return round(coverage, 2)
+                else:
+                    logger.info("No line coverage data found")
+                    return -1
+            else:
+                logger.info("Test class not found in coverage data")
+                return -1
+
+        except subprocess.CalledProcessError as e:
+            logger.info(f"Error: {e}")
+            return -1
+        except Exception as e:
+            logger.info(f"Unexpected error: {e}")
+            return -1
 
 
 class PythonDynamic(CodeDynamic):
     """Python-specific implementation of CodeDynamic for building and testing Python code."""
-    
+
     def modify_judgment(self, result) -> bool:
         """Determine if Python build output requires modifications.
 
@@ -745,21 +831,19 @@ class PythonDynamic(CodeDynamic):
         :returns: True if build target exists, False otherwise
         :rtype: bool
         """
-        target = os.path.join(self.project_path, "built")
+        target = os.path.join(self.config.project_path, "built")
         return os.path.exists(target)
 
-    def __init__(self, project_path: str = None, project_name: str = None):
+    def __init__(self, config: BuildConfig):
         """Initialize PythonDynamic instance.
 
-        :param project_path: Path to the project directory
-        :type project_path: str
-        :param project_name: Name of the project, defaults to None
-        :type project_name: str
+        :param config: Configuration for the build process
+        :type config: BuildConfig
         """
-        super().__init__(project_path)
-        self.languages = "python"
-        self.exec = "py"
-        self.test_file_name = "test"
+        super().__init__(config)
+        self.config.language = "python"
+        self.config.exec_extension = "py"
+        self.config.test_file_name = "test"
 
     def build_target(self, target_name: str) -> str:
         """Build a Python target file.
@@ -773,14 +857,14 @@ class PythonDynamic(CodeDynamic):
         env = CodeDynamic.env
         python_path = env['PYTHON']
         cmd = [python_path, target_name]
-        output = self.run_cmd(cmd, exe_env=self.project_path)
+        output = self.run_cmd(cmd, exe_env=self.config.project_path)
         if "Traceback" in output:
             return output
-        with open(os.path.join(self.project_path, "built"), 'w') as file:
+        with open(os.path.join(self.config.project_path, "built"), 'w') as file:
             pass
         return "success"
 
-    def execute(self, target_file:str = None) -> str:
+    def execute(self, target_file: str = None) -> str:
         """Execute a Python script.
 
         :param target_file: Name of the Python file to execute, defaults to test file
@@ -791,8 +875,47 @@ class PythonDynamic(CodeDynamic):
         :raises subprocess.SubprocessError: If execution fails
         """
         if not target_file:
-            target_file = f"{self.test_file_name}.py"
+            target_file = f"{self.config.test_file_name}.py"
         env = CodeDynamic.env
         python_path = env['PYTHON']
         cmd = [python_path, target_file]
-        return self.run_cmd(cmd, exe_env=self.project_path)
+        return self.run_cmd(cmd, exe_env=self.config.project_path)
+
+    def run_coverage(self) -> float:
+        """Run Python coverage analysis on Python test file.
+
+        Uses the coverage.py package to measure code coverage of Python tests.
+        Executes the test file and generates a coverage report.
+
+        :returns: Coverage percentage as float, or -1 if analysis fails
+        :rtype: float
+        """
+        try:
+            # Run tests with coverage
+            logger.info("Running tests with coverage analysis...")
+            cmd = [self.env['PYTHON'], "-m", "coverage", "run", f"{self.config.test_file_name}.py"]
+            output = self.run_cmd(cmd, exe_env=self.config.project_path)
+            if "Traceback" in output:
+                logger.error(f"Test execution failed: {output}")
+                return -1
+
+            # Generate coverage report
+            logger.info("Generating coverage report...")
+            cmd = [self.env['PYTHON'], "-m", "coverage", "report"]
+            report = self.run_cmd(cmd, exe_env=self.config.project_path)
+            
+            # Parse coverage percentage from report
+            try:
+                # Extract last line containing total coverage
+                total_line = report.strip().split('\n')[-1]
+                # Parse coverage percentage (typically in format "TOTAL xxx xx%")
+                coverage = float(total_line.split()[-1].replace('%', ''))
+                logger.info(f"Coverage: {coverage}%")
+                return coverage
+            except (IndexError, ValueError) as e:
+                logger.error(f"Failed to parse coverage report: {e}")
+                return -1
+
+        except Exception as e:
+            logger.error(f"Coverage analysis failed: {e}")
+            return -1

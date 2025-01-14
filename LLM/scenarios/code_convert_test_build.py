@@ -99,13 +99,11 @@ class CodeConvertBuildTestScenario(Scenario):
 
             For instance, '[98, 86, 26, 42, 42]' and '[98, 14, 26, 42, 58]' are same format;
 
-            'Encrypted: b3bbfPHQOU4FdmL5cVfi0hMpQ12ryFLPadGYonJvASs=T6c8mxOoGIipwn8ZExxhQA==' and
+            'Encrypted: MpQ12ryFLPad3GYonJvASs==T6c8mxOoGIipwn8ZExxhQA==' and
             'Encrypted: b3bbfPHQOU4FdmL5cVfi0g==YKqPqcch9fFNlOK0uGrpiQ==' are same format;
 
             '185/Kr5mWK+UwU3oCWIBvw==' and 'F+9wOBUhizlc7bbQGRzdng==' are same format;
-
-            '8C80ZFF6+umuqVqWgWA7+d+5A8Qtb5/6ekcCStrppVA='and 'gqponOBdkZolVk/jP0OfE5s1Dhok+dBT' are same format;
-
+            
             If arrays are of the same length but contain different elements, they are considered consistent.
             Using the same cryptography type is also deemed consistent.
 
@@ -115,7 +113,8 @@ class CodeConvertBuildTestScenario(Scenario):
             # Execute the code and store the result.
             source_result = self.other_language.execute()
             # Execute the Rust code and store the result.
-            rust_result = self.rust.execute()
+            rust_result = self.rust.execute() 
+            
             # Return a formatted string comparing both results.
             return f"source output is '{source_result}', rust output is '{rust_result}'. "
 

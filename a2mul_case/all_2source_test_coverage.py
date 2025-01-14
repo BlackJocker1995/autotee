@@ -8,8 +8,7 @@ from static.projectUtil import list_directories
 import numpy as np
 
 if __name__ == '__main__':
-    # codescan = OllamaModel("qwen2.5-coder:32b")
-    base_path = "/home/rdhan/data/dataset/python_mul_case"
+    base_path = "/home/rdhan/data/dataset/java_mul_case"
 
     overwrite = False
 
@@ -22,7 +21,7 @@ if __name__ == '__main__':
 
         project_path = os.path.join(base_path, dir_item)
 
-        test_assistance = TestAssistance.class_generator("python")
+        test_assistance = TestAssistance.class_generator("java")
 
         test_assistance.run_test_coverage(project_path)
         

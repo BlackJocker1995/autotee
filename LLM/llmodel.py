@@ -2,7 +2,8 @@ from typing import Type, Optional, Dict, List
 from abc import ABC, abstractmethod
 import os
 from pathlib import Path
-from pydantic import BaseModel, BaseSettings
+from pydantic import BaseModel
+from pydantic_settings import BaseSettings
 from loguru import logger
 
 class LLMConfig(BaseSettings):
@@ -246,14 +247,14 @@ class LModel(ABC):
         You WILL return the instance of the JSON schema with the CORRECT extracted data, NOT the JSON schema itself. 
         """.strip()
 
-    @abc.abstractmethod
+    @abstractmethod
     def close(self):
         """
         Close the client connection.
         """
         raise AttributeError('Sub class does not implement this function.')
 
-    @abc.abstractmethod
+    @abstractmethod
     def execute(self, messages:list, schema_model: Type[BaseModel] = None) -> BaseModel:
         """
         Execute the query with the given messages and schema model.

@@ -10,8 +10,6 @@ from .conversion_examples import JAVA_CONVERSION_EXAMPLES, PYTHON_CONVERSION_EXA
 from LLM.llmodel import LModel, OpenAIModel
 from LLM.output import Output
 from LLM.react import ReActModel
-from LLM.scenarios.code_build import CodeBuildScenario
-from LLM.scenarios.code_conver import CodeConvertScenario
 from LLM.scenarios.code_convert_test_build import CodeConvertBuildTestScenario
 from build.build_dynamic import RustDynamic, CodeDynamic
 from static.code_match import PythonCode
@@ -34,10 +32,10 @@ class TestAssistance:
         self.code_dynamic = CodeDynamic.class_generator(config.source_language)
         
     def set_project_path(self, project_path: str):
-        self.code_dynamic.project_path = project_path
+        self.code_dynamic.config.project_path = project_path
 
     def set_project_name(self, project_name: str):
-        self.code_dynamic.project_name = project_name
+        self.code_dynamic.config.project_path = project_name
 
     def list_source_project(self, project_path):
         code_file_path = os.path.join(project_path, "code_file")
@@ -400,6 +398,76 @@ class TestAssistance:
         main_code = main_code.code
 
         return main_code
+
+    def run_test_coverage(self, project_path:str) -> None:
+        """Run coverage analysis for all test files in project directories.
+        
+        Similar pattern to build_test_mul but for coverage analysis.
+        
+        :param project_path: Root directory containing project files
+        :type project_path: str
+        :returns: Dictionary mapping directory names to coverage percentages
+        :rtype: dict
+        """
+        # List all source directories in the given project path
+        dirs = self.list_source_project(project_path)
+
+        # Iterate over each directory item
+        for dir_item in dirs:
+            logger.info(f"Running coverage analysis for {dir_item}...")
+
+            # Construct the full path to the directory
+            path_dir = os.path.join(project_path, "code_file", dir_item)
+
+            # Check if the directory exists
+            if not os.path.exists(path_dir):
+                logger.error(f"Directory {path_dir} does not exist")
+                continue
+
+            # Set the current project path
+            self.set_project_path(str(path_dir))
+
+            # Run coverage analysis 
+            if hasattr(self.code_dynamic, 'run_coverage'):
+                coverage = self.code_dynamic.run_coverage()
+                if coverage:
+                    coverage_file = os.path.join(path_dir, "coverage.txt")
+                    with open(coverage_file, "w") as f:
+                        f.write(f"Coverage: {coverage}%")
+            else:
+                logger.warning(f"Coverage analysis not supported for {self.config.source_language}")
+
+    def calculate_average_coverage(self, project_path: str) -> float:
+        """Calculate average coverage from coverage.txt files in project directories.
+        
+        :param project_path: Root directory containing project files
+        :type project_path: str
+        :returns: Average coverage percentage across all directories
+        :rtype: float
+        """
+        dirs = self.list_source_project(project_path)
+        coverages = []
+
+        for dir_item in dirs:
+            path_dir = os.path.join(project_path, "code_file", dir_item)
+            coverage_file = os.path.join(path_dir, "coverage.txt")
+            
+            if os.path.exists(coverage_file):
+                try:
+                    with open(coverage_file, "r") as f:
+                        content = f.read()
+                        # Extract coverage percentage from "Coverage: XX%" format
+                        coverage = float(content.split(":")[1].strip().replace("%", ""))
+                        coverages.append(coverage)
+                except (ValueError, IndexError) as e:
+                    logger.error(f"Error reading coverage from {coverage_file}: {str(e)}")
+                    continue
+        
+        if not coverages:
+            logger.warning("No coverage data found")
+            return 0.0
+            
+        return sum(coverages) / len(coverages)
 
     @staticmethod
     def class_generator(language):

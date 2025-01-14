@@ -1,5 +1,12 @@
+"""
+Code conversion examples for different languages to Rust.
+Contains examples of converting Java and Python code to equivalent Rust implementations.
+"""
+
+from typing import List
+
 # Java to Rust conversion examples
-JAVA_CONVERSION_EXAMPLES = [
+JAVA_CONVERSION_EXAMPLES: List[str] = [
     """
     public SecretKey generateSecretKey() {
         try {
@@ -103,7 +110,7 @@ JAVA_CONVERSION_EXAMPLES = [
 ]
 
 # Python to Rust conversion examples
-PYTHON_CONVERSION_EXAMPLES = [
+PYTHON_CONVERSION_EXAMPLES: List[str] = [
     """
     def encode_message(message: bytes, segment_len: int) -> list:
         message += bytes(segment_len - len(message) % (segment_len))
