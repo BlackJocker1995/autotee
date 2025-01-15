@@ -67,7 +67,8 @@ class TestAssistance:
                          overwrite: bool,
                          is_multiple: bool) -> None:
         """Process a single test directory"""
-        if not self._should_process_dir(dir_item):
+        if not dir_item.exists():
+            logger.warning(f"Directory does not exist: {dir_item}")
             return
             
         path_dir = dir_item / "code_file"
