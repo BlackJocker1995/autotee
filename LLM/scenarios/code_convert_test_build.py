@@ -2,7 +2,7 @@ import os.path
 from typing import Optional, Dict
 
 from LLM.action import Scenario
-from build.build_dynamic import RustDynamic, JavaDynamic, CodeDynamic
+from build.build_dynamic import BuildConfig, RustDynamic, JavaDynamic, CodeDynamic
 from static.get_env import return_env
 
 def contains_star(arr):
@@ -36,8 +36,9 @@ class CodeConvertBuildTestScenario(Scenario):
                 f"Ensure that the input and output remain unchanged.")
 
     class Actions(Scenario.Actions):
-        def __init__(self,  language:str, source_project_path:str, rust_project_path:str ):
-            self.rust = RustDynamic(rust_project_path)
+        def __init__(self, language: str, source_project_path: str, rust_project_path: str):
+            rust_config = BuildConfig(language="rust", exec_extension="rs", test_file_name="test", project_path=rust_project_path, project_name="tee")
+            self.rust = RustDynamic(rust_config)
             self.other_language = CodeDynamic.class_generator(language, source_project_path)
 
         def update_dependencies(self, dependencies: list) -> str:
@@ -99,11 +100,13 @@ class CodeConvertBuildTestScenario(Scenario):
 
             For instance, '[98, 86, 26, 42, 42]' and '[98, 14, 26, 42, 58]' are same format;
 
-            'Encrypted: MpQ12ryFLPad3GYonJvASs==T6c8mxOoGIipwn8ZExxhQA==' and
+            'Encrypted: b3bbfPHQOU4FdmL5cVfi0hMpQ12ryFLPadGYonJvASs=T6c8mxOoGIipwn8ZExxhQA==' and
             'Encrypted: b3bbfPHQOU4FdmL5cVfi0g==YKqPqcch9fFNlOK0uGrpiQ==' are same format;
 
             '185/Kr5mWK+UwU3oCWIBvw==' and 'F+9wOBUhizlc7bbQGRzdng==' are same format;
-            
+
+            '8C80ZFF6+umuqVqWgWA7+d+5A8Qtb5/6ekcCStrppVA='and 'gqponOBdkZolVk/jP0OfE5s1Dhok+dBT' are same format;
+
             If arrays are of the same length but contain different elements, they are considered consistent.
             Using the same cryptography type is also deemed consistent.
 
@@ -113,8 +116,7 @@ class CodeConvertBuildTestScenario(Scenario):
             # Execute the code and store the result.
             source_result = self.other_language.execute()
             # Execute the Rust code and store the result.
-            rust_result = self.rust.execute() 
-            
+            rust_result = self.rust.execute()
             # Return a formatted string comparing both results.
             return f"source output is '{source_result}', rust output is '{rust_result}'. "
 

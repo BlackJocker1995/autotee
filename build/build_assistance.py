@@ -11,7 +11,7 @@ from LLM.llmodel import LModel, OpenAIModel
 from LLM.output import Output
 from LLM.react import ReActModel
 from LLM.scenarios.code_convert_test_build import CodeConvertBuildTestScenario
-from build.build_dynamic import RustDynamic, CodeDynamic
+from build.build_dynamic import RustDynamic, CodeDynamic, BuildConfig
 from static.code_match import PythonCode
 from static.get_env import return_env
 from static.projectUtil import list_directories, copy_directory
@@ -22,7 +22,7 @@ class ConversionConfig:
     source_language: str
     target_language: str = "rust"
     examples: List[str] = field(default_factory=list)
-    agent_model: Optional[str] = None
+    agent_model: str
 
 class TestAssistance:
     """Base class for language-specific test assistance"""
@@ -30,7 +30,7 @@ class TestAssistance:
     def __init__(self, config: ConversionConfig):
         self.config = config
         self.code_dynamic = CodeDynamic.class_generator(config.source_language)
-        
+    
     def set_project_path(self, project_path: str):
         self.code_dynamic.config.project_path = project_path
 
@@ -67,8 +67,7 @@ class TestAssistance:
                          overwrite: bool,
                          is_multiple: bool) -> None:
         """Process a single test directory"""
-        if not dir_item.exists():
-            logger.warning(f"Directory does not exist: {dir_item}")
+        if not self._should_process_dir(dir_item):
             return
             
         path_dir = dir_item / "code_file"
@@ -161,17 +160,16 @@ class TestAssistance:
             # Build the file with necessary fixes
             self.code_dynamic.build_file_with_fix(file_name)
 
-    def convert_and_build(self, project_path:str, agent_model:str, overwrite=False):
+    def convert_and_build(self, project_path:str, overwrite=False):
         """
         3 step
-        :param agent_model:
         :param project_path:
         :param overwrite:
         :return:
         """
 
         # short name
-        name = LModel.get_short_name(agent_model)
+        name = LModel.get_model_short_name(self.config.agent_model)
         source_path = os.path.join(f"/home/rdhan/tmp/{name}/tee")
 
         code_file_path = os.path.join(project_path, "code_file")
@@ -206,7 +204,7 @@ class TestAssistance:
                 source_code = f.read()
 
             # Process the code to convert it to Rust and extract dependencies
-            result = self._react_convert_build_test(source_code, source_path_dir, agent_model)
+            result = self._react_convert_build_test(source_code, source_path_dir)
             if result != -1:
                 copy_directory(source_path, rust_path_dir, ["target"])
                 os.mkdir(os.path.join(rust_path_dir, f"{result}"))
@@ -285,23 +283,22 @@ class TestAssistance:
 
             logger.info(f"Switch to {dir_item}.")
 
-            target_rust = RustDynamic(dir_item, "tee")
+            target_rust = RustDynamic(BuildConfig(dir_item, "tee"))  # Updated parameter
             target_rust.build_target()
 
-    def _react_convert_build_test(self, code, path_dir, agent_model) -> int:
+    def _react_convert_build_test(self, code, path_dir) -> int:
         """
         Convert, build, and test the given code using a ReAct model.
 
         :param code: The source code to be converted
         :param path_dir: The directory path of the source code
-        :param agent_model: The agent model to be used
         :return: An integer indicating the success (-1) or failure (other values) of the process
         """
         # Get the path for the Rust project
-        rust_project_path = self._get_rust_project_path(agent_model)
+        rust_project_path = self._get_rust_project_path()
         
         # Create a ReAct model instance
-        model = self._create_react_model(path_dir, rust_project_path, agent_model)
+        model = self._create_react_model(path_dir, rust_project_path)
         
         # Analyze the source code and add conversion examples
         if not self._analyze_code(model, code):
@@ -318,19 +315,21 @@ class TestAssistance:
         # Verify if the Rust code builds successfully
         return self._verify_build_success(model, rust_code)
 
-    def _get_rust_project_path(self, agent_model) -> str:
+    def _get_rust_project_path(self) -> str:
         """Get the path for the Rust project"""
         return os.path.join(return_env()["tee_build_path"],
-                          LModel.get_short_name(agent_model))
+                          LModel.get_model_short_name(self.config.agent_model))
 
-    def _create_react_model(self, path_dir, rust_project_path, agent_model):
+    def _create_react_model(self, path_dir:str, rust_project_path:str):
         """Create and return a ReActModel instance"""
         return ReActModel(
             env_class=CodeConvertBuildTestScenario,
-            client_model=agent_model,
+            client_model=self.config.agent_model,
             language=self.config.source_language,
             source_project_path=path_dir,
-            rust_project_path=rust_project_path
+            rust_project_path=rust_project_path,
+            project_path=rust_project_path,
+            project_name="tee"
         )
 
     def _analyze_code(self, model, code) -> bool:
@@ -359,12 +358,18 @@ class TestAssistance:
         if qus_result is None:
             return None, None
 
-        model.agent.messages_memary.pop(2)
+        model.agent.messages_memory.pop(2)
         return qus_result.code, qus_result.dependencies
 
     def _setup_rust_project(self, rust_project_path, rust_code):
         """Set up the Rust project with the converted code"""
-        rust_target = RustDynamic(rust_project_path)
+        rust_target = RustDynamic(BuildConfig(
+            language="rust",
+            exec_extension="rs",
+            test_file_name="main.rs",
+            project_path=rust_project_path,
+            project_name="tee"
+        ))
         rust_target.new_project()
         rust_target.clear_dependencies()
         rust_target.write_file_code("main.rs", rust_code)
@@ -471,20 +476,21 @@ class TestAssistance:
         return sum(coverages) / len(coverages)
 
     @staticmethod
-    def class_generator(language):
+    def class_generator(language, agent_model) -> 'TestAssistance':
         """
         Generate and return an instance of the appropriate TestAssistance subclass based on the given language.
 
         :param language: A string representing the programming language (e.g., 'java' or 'python')
+        :param agent_model: Optional string representing the agent model
         :return: An instance of the corresponding TestAssistance subclass
         """
-        # Dictionary mapping language strings to their respective TestAssistance subclasses
+        # Dictionary mapping language strings to their respective TestAssistance subclasses 
         class_dict = {
             "java": JavaTestAssistance,
             "python": PythonTestAssistance
         }
-        # Return an instance of the appropriate subclass, initialized with the language
-        return class_dict[language](ConversionConfig(language))
+        # Return an instance of the appropriate subclass, initialized with the language and agent model
+        return class_dict[language](ConversionConfig(source_language = language, agent_model=agent_model))
 
 class JavaTestAssistance(TestAssistance):
 

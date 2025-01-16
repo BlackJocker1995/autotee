@@ -12,6 +12,6 @@ if __name__ == '__main__':
 
     overwrite = False
 
-    test_assistance = TestAssistance.class_generator("java")
+    test_assistance = TestAssistance.class_generator("java", "gpt-4o")
 
-    test_assistance.build_test_mul(project_path, "Test.java",overwrite)
+    test_assistance.build_test_mul(project_path, "Test.java", overwrite)

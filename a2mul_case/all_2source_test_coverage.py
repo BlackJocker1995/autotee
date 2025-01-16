@@ -21,7 +21,7 @@ if __name__ == '__main__':
 
         project_path = os.path.join(base_path, dir_item)
 
-        test_assistance = TestAssistance.class_generator("java")
+        test_assistance = TestAssistance.class_generator("java", "gpt-4o")
 
         test_assistance.run_test_coverage(project_path)
         

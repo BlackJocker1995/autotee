@@ -14,6 +14,7 @@ if __name__ == '__main__':
 
     overwrite = False
 
-    test_assistance = TestAssistance.class_generator("java")
+    agent_model = "gpt-4o"
+    test_assistance = TestAssistance.class_generator("java", "gpt-4o")
 
     test_assistance.add_mul_test_case(codescan, project_path, overwrite)

@@ -153,7 +153,7 @@ class LModel(ABC):
         self.messages_memory.append({"role": "system", "content": message})
 
     @staticmethod
-    def class_generator(model_name: str):
+    def class_generator(agent_model: str):
         """
         Generate a class instance based on the model name.
         :param model_name: The name of the model.
@@ -169,18 +169,18 @@ class LModel(ABC):
         }
         # Iterate over each key in the dictionary
         for key in class_dict:
-            # Check if the current key is a substring of the model_client string
-            if key in model_name:
+            # Check if the current key is a substring of the agent_model string
+            if key in agent_model:
                 # If found, return the corresponding value from the dictionary
-                return class_dict[key](model_name)
-        raise ValueError(f"Unknown model name: {model_name}")
+                return class_dict[key](agent_model)
+        raise ValueError(f"Unknown model name: {agent_model}")
 
     @classmethod
-    def get_short_name(cls,model_client:str) -> str:
+    def get_model_short_name(cls,agent_model:str) -> str:
         """
         Get the short name of the model client.
-        :param model_client: The name of the model client.
-        :type model_client: str
+        :param agent_model: The name of the model client.
+        :type agent_model: str
         :return: The short name of the model client.
         :rtype: str
         """
@@ -195,13 +195,13 @@ class LModel(ABC):
 
         # Iterate over each key in the dictionary
         for key in class_dict:
-            # Check if the current key is a substring of the model_client string
-            if key in model_client:
+            # Check if the current key is a substring of the agent_model string
+            if key in agent_model:
                 # If found, return the corresponding value from the dictionary
                 return class_dict[key]
 
-        # If no keys are found in model_client, raise an exception
-        raise ValueError(f"Unknown model name: {model_client}")
+        # If no keys are found in agent_model, raise an exception
+        raise ValueError(f"Unknown model name: {agent_model}")
 
     def re_init_chat(self, system_messages:str=None):
         """

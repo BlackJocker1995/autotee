@@ -23,6 +23,6 @@ if __name__ == '__main__':
 
         project_path = os.path.join(base_path, dir_item)
 
-        test_assistance = TestAssistance.class_generator("python")
+        test_assistance = TestAssistance.class_generator("python", "gpt-4o")
 
         test_assistance.build_test_mul(project_path, "test.py", overwrite)
