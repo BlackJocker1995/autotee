@@ -19,6 +19,6 @@ if __name__ == '__main__':
 
         project_path = os.path.join(base_path, dir_item)
 
-        test_assistance = TestAssistance.class_generator("python", "deepseek-chat")
+        test_assistance = TestAssistance.class_generator("python")
 
-        test_assistance.convert_and_build(project_path)
+        test_assistance.convert_and_build(project_path, agent_model="deepseek-chat")
