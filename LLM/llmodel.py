@@ -2,9 +2,15 @@ from typing import Type, Optional, Dict, List
 from abc import ABC, abstractmethod
 import os
 from pathlib import Path
+import instructor
+import ollama
+from openai import OpenAI
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 from loguru import logger
+
+from LLM.output import Output
+from dotenv import load_dotenv
 
 class LLMConfig(BaseSettings):
     """Configuration for LLM models. Only contains non-sensitive settings."""
@@ -13,14 +19,21 @@ class LLMConfig(BaseSettings):
     max_retries: int = 3
     
     class Config:
-        env_file = ".env"
+        token_file = ".token"
+        extra = "ignore"  # Ignore extra fields
 
 def get_api_key(key_name: str) -> Optional[str]:
-    """Safely get API key from environment variables."""
-    key = os.getenv(key_name)
-    if not key:
-        logger.warning(f"{key_name} not found in environment variables")
-    return key
+    """Get API key from environment variables or .env file."""
+    
+    # Get the directory of the current file
+    current_dir = Path(__file__).parent
+    env_path = current_dir / '.env'
+    
+    # Load .env file if it exists
+    if env_path.exists():
+        load_dotenv(env_path)
+    
+    return os.getenv(key_name)
 
 class LModel(ABC):
     """Base class for LLM implementations."""
@@ -153,7 +166,7 @@ class LModel(ABC):
         self.messages_memory.append({"role": "system", "content": message})
 
     @staticmethod
-    def class_generator(agent_model: str):
+    def class_generator(model_name: str):
         """
         Generate a class instance based on the model name.
         :param model_name: The name of the model.
@@ -163,24 +176,25 @@ class LModel(ABC):
         """
         class_dict = {
             "gpt": OpenAIModel,
-            "qwen": QwenModel,
+            "qwen": QwenModelLocal,
             "llama": OllamaModel,
             "deepseek": DeepseekModel,
+            "deepseek-r1": DeepseekModelLocal,
         }
         # Iterate over each key in the dictionary
         for key in class_dict:
-            # Check if the current key is a substring of the agent_model string
-            if key in agent_model:
+            # Check if the current key is a substring of the model_client string
+            if key in model_name:
                 # If found, return the corresponding value from the dictionary
-                return class_dict[key](agent_model)
-        raise ValueError(f"Unknown model name: {agent_model}")
+                return class_dict[key](model_name)
+        raise ValueError(f"Unknown model name: {model_name}")
 
     @classmethod
-    def get_model_short_name(cls,agent_model:str) -> str:
+    def get_short_name(cls,model_client:str) -> str:
         """
         Get the short name of the model client.
-        :param agent_model: The name of the model client.
-        :type agent_model: str
+        :param model_client: The name of the model client.
+        :type model_client: str
         :return: The short name of the model client.
         :rtype: str
         """
@@ -190,18 +204,19 @@ class LModel(ABC):
             "qwen2.5": "qwen2.5",
             "qwen": "qwen",
             "llama": "llama",
-            "deepseek": "deepseek",
+            "deepseek-chat": "deepseek",
+            "deepseek-r1": "deepseek-r1",
         }
 
         # Iterate over each key in the dictionary
         for key in class_dict:
-            # Check if the current key is a substring of the agent_model string
-            if key in agent_model:
+            # Check if the current key is a substring of the model_client string
+            if key in model_client:
                 # If found, return the corresponding value from the dictionary
                 return class_dict[key]
 
-        # If no keys are found in agent_model, raise an exception
-        raise ValueError(f"Unknown model name: {agent_model}")
+        # If no keys are found in model_client, raise an exception
+        raise ValueError(f"Unknown model name: {model_client}")
 
     def re_init_chat(self, system_messages:str=None):
         """
@@ -301,21 +316,21 @@ class OpenAIModel(LModel):
 
 
 class OllamaModel(LModel):
-    def __init__(self, client_model: str):
-        LModel.__init__(self)
+    """Ollama API implementation."""
+    
+    def _initialize_client(self) -> None:
         try:
-            self.client = ollama.Client(host='http://localhost:11434')
+            self.client = ollama.Client(host=self.config.ollama_host)
         except Exception as e:
             logger.warning(f"init ollama failed: {e}")
             raise ValueError("init ollama failed")
-        self.client_model = client_model
-
+    
     def execute(self, messages: List[Dict[str, str]], 
                 schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
         for attempt in range(self.config.max_retries):
             try:
                 completion = self.client.chat(
-                    model=self.client_model,
+                    model=self.model_name,
                     messages=messages,
                     options={"num_ctx": 5120, "timeout": self.config.timeout},
                     format=(schema_model or Output.StructureAnswer).model_json_schema(),
@@ -345,22 +360,22 @@ class OllamaModel(LModel):
             logger.info("To completely stop Ollama, run in terminal:")
             logger.info("  ollama serve --stop")
 
-class QwenModel(LModel):
-    def __init__(self, client_model):
-        LModel.__init__(self)
+class QwenModelLocal(LModel):
+    """Qwen API implementation."""
+    
+    def _initialize_client(self) -> None:
         try:
-            self.client = ollama.Client(host='http://localhost:11434')
+            self.client = ollama.Client(host=self.config.ollama_host)
         except Exception as e:
             logger.warning(f"init qwen failed: {e}")
             raise ValueError("init qwen failed")
-        self.client_model = client_model
-
+    
     def execute(self, messages: List[Dict[str, str]], 
                 schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
         for attempt in range(self.config.max_retries):
             try:
                 completion = self.client.chat(
-                    model=self.client_model,
+                    model=self.model_name,
                     messages=messages,
                     options={"num_ctx": 5120, "timeout": self.config.timeout},
                     format=(schema_model or Output.StructureAnswer).model_json_schema(),
@@ -390,27 +405,73 @@ class QwenModel(LModel):
             logger.info("To completely stop Qwen, run in terminal:")
             logger.info("  ollama serve --stop")
 
+
+class DeepseekModelLocal(LModel):
+    """Qwen API implementation."""
+    
+    def _initialize_client(self) -> None:
+        try:
+            self.client = ollama.Client(host=self.config.ollama_host)
+        except Exception as e:
+            logger.warning(f"init qwen failed: {e}")
+            raise ValueError("init qwen failed")
+    
+    def execute(self, messages: List[Dict[str, str]], 
+                schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
+        for attempt in range(self.config.max_retries):
+            try:
+                completion = self.client.chat(
+                    model=self.model_name,
+                    messages=messages,
+                    options={"num_ctx": 5120, "timeout": self.config.timeout},
+                    format=(schema_model or Output.StructureAnswer).model_json_schema(),
+                )
+                return (schema_model or Output.StructureAnswer).model_validate_json(
+                    completion['message']['content']
+                )
+            except Exception as e:
+                if attempt == self.config.max_retries - 1:
+                    raise e
+                logger.warning(f"Attempt {attempt + 1} failed: {e}")
+
+    def close(self):
+        """
+        Clean up the Qwen client connection.
+        Attempts to gracefully close the connection and provides CLI instructions
+        if the programmatic close fails.
+        """
+        try:
+            # Attempt to clean up the client instance
+            if hasattr(self.client, '_session'):
+                self.client._session.close()
+            self.client = None
+            logger.info("Qwen client connection closed.")
+        except Exception as e:
+            logger.warning(f"Failed to close Qwen client programmatically: {e}")
+            logger.info("To completely stop Qwen, run in terminal:")
+            logger.info("  ollama serve --stop")
+
+
 class DeepseekModel(LModel):
-    def __init__(self, client_model):
-        LModel.__init__(self)
+    """Deepseek API implementation."""
+    
+    def _initialize_client(self) -> None:
         api_key = get_api_key("DEEPSEEK")
         if not api_key:
             raise ValueError("Deepseek API key not found in environment variables")
         try:
-            self.client = OpenAI(api_key=api_key,
-                               base_url="https://api.deepseek.com")
+            self.client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
         except Exception as e:
             logger.warning(f"init deepseek failed: {e}")
             raise ValueError("init deepseek failed")
-        self.client_model = client_model
-
+    
     def execute(self, messages: List[Dict[str, str]], 
                 schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
         for attempt in range(self.config.max_retries):
             try:
                 tmp_agent = instructor.from_openai(self.client, mode=instructor.Mode.JSON)
                 completion = tmp_agent.chat.completions.create(
-                    model=self.client_model,
+                    model=self.model_name,
                     messages=messages,
                     response_model=schema_model or Output.StructureAnswer,
                     timeout=self.config.timeout

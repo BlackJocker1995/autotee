@@ -21,4 +21,4 @@ if __name__ == '__main__':
 
         test_assistance = TestAssistance.class_generator("python")
 
-        test_assistance.convert_and_build(project_path, agent_model="deepseek-chat")
+        test_assistance.convert_and_build(project_path, agent_model="deepseek-r1")
