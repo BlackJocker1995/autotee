@@ -118,7 +118,10 @@ class CodeConvertBuildTestScenario(Scenario):
             # Execute the Rust code and store the result.
             rust_result = self.rust.execute()
             # Return a formatted string comparing both results.
-            return f"source output is '{source_result}', rust output is '{rust_result}'. "
+            if source_result == rust_result:
+                return "The output is consistent."
+            else:
+                return f"Inconsistent, source output is '{source_result}', rust output is '{rust_result}'. "
 
         def update_rust_code(self, code: str) -> str:
             """
