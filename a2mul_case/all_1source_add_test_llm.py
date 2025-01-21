@@ -20,6 +20,6 @@ if __name__ == '__main__':
 
         project_path = os.path.join(base_path, dir_item)
 
-        test_assistance = TestAssistance.class_generator("python", "gpt-4o")
+        test_assistance = TestAssistance.class_generator("python")
 
-        test_assistance.add_mul_test_case(codescan, project_path, overwrite)
+        test_assistance.add_multiple_test_cases(codescan, project_path, overwrite)

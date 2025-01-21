@@ -22,7 +22,7 @@ class ConversionConfig:
     source_language: str
     target_language: str = "rust"
     examples: List[str] = field(default_factory=list)
-    agent_model: str
+    agent_model: Optional[str] = None
 
 class TestAssistance:
     """Base class for language-specific test assistance"""
@@ -56,30 +56,11 @@ class TestAssistance:
             overwrite: Whether to overwrite existing tests
             is_multiple: Whether to generate multiple test cases
         """
-        for dir_item in self._get_source_dirs(project_path):
-            try:
-                self._process_test_dir(dir_item, agent, overwrite, is_multiple)
-            except Exception as e:
-                logger.error(f"Error processing {dir_item}: {str(e)}")
-
-    def _process_test_dir(self, dir_item: Path,
-                         agent: LModel,
-                         overwrite: bool,
-                         is_multiple: bool) -> None:
-        """Process a single test directory"""
-        if not self._should_process_dir(dir_item):
-            return
-            
-        path_dir = dir_item / "code_file"
-        main_file = path_dir / f"main.{self.config.source_language}"
-        test_file = path_dir / f"test.{self.config.source_language}"
-        
-        if not self._should_process_test_file(test_file, overwrite, main_file):
-            return
-            
-        source_code = self._read_source_code(main_file)
-        result = self._generate_test_cases(agent, source_code, is_multiple)
-        self._write_test_file(test_file, result)
+        for dir_item in self.list_source_project(project_path):
+            #try:
+            self._process_test_dir(dir_item, agent, overwrite, is_multiple)
+            # except Exception as e:
+            #     logger.error(f"Error processing {dir_item}: {str(e)}")
 
     def _should_process_test_file(self, test_file, overwrite, main_file):
         """Check if test file should be processed"""
@@ -92,6 +73,22 @@ class TestAssistance:
             return False
             
         return True
+    
+    
+    def _process_test_dir(self, dir_item: Path,
+                         agent: LModel,
+                         overwrite: bool,
+                         is_multiple: bool) -> None:
+
+        main_file = os.path.join(dir_item, f"main.{self.code_dynamic.config.exec_extension}")
+        test_file = os.path.join(dir_item, f"test.{self.code_dynamic.config.exec_extension}")
+        
+        if not self._should_process_test_file(test_file, overwrite, main_file):
+            return
+            
+        source_code = self._read_source_code(main_file)
+        result = self.code_dynamic.design_test_cases(agent, source_code, is_multiple)
+        self._write_test_file(test_file, result)
 
     def _read_source_code(self, file_path):
         """Read source code from file"""
@@ -160,16 +157,17 @@ class TestAssistance:
             # Build the file with necessary fixes
             self.code_dynamic.build_file_with_fix(file_name)
 
-    def convert_and_build(self, project_path:str, overwrite=False):
+    def convert_and_build(self, project_path:str, agent_model:str, overwrite=False):
         """
         3 step
+        :param agent_model:
         :param project_path:
         :param overwrite:
         :return:
         """
 
         # short name
-        name = LModel.get_model_short_name(self.config.agent_model)
+        name = LModel.get_short_name(agent_model)
         source_path = os.path.join(f"/home/rdhan/tmp/{name}/tee")
 
         code_file_path = os.path.join(project_path, "code_file")
@@ -204,7 +202,7 @@ class TestAssistance:
                 source_code = f.read()
 
             # Process the code to convert it to Rust and extract dependencies
-            result = self._react_convert_build_test(source_code, source_path_dir)
+            result = self._react_convert_build_test(source_code, source_path_dir, agent_model)
             if result != -1:
                 copy_directory(source_path, rust_path_dir, ["target"])
                 os.mkdir(os.path.join(rust_path_dir, f"{result}"))
@@ -286,19 +284,20 @@ class TestAssistance:
             target_rust = RustDynamic(BuildConfig(dir_item, "tee"))  # Updated parameter
             target_rust.build_target()
 
-    def _react_convert_build_test(self, code, path_dir) -> int:
+    def _react_convert_build_test(self, code, path_dir, agent_model) -> int:
         """
         Convert, build, and test the given code using a ReAct model.
 
         :param code: The source code to be converted
         :param path_dir: The directory path of the source code
+        :param agent_model: The agent model to be used
         :return: An integer indicating the success (-1) or failure (other values) of the process
         """
         # Get the path for the Rust project
-        rust_project_path = self._get_rust_project_path()
+        rust_project_path = self._get_rust_project_path(agent_model)
         
         # Create a ReAct model instance
-        model = self._create_react_model(path_dir, rust_project_path)
+        model = self._create_react_model(path_dir, rust_project_path, agent_model)
         
         # Analyze the source code and add conversion examples
         if not self._analyze_code(model, code):
@@ -315,16 +314,16 @@ class TestAssistance:
         # Verify if the Rust code builds successfully
         return self._verify_build_success(model, rust_code)
 
-    def _get_rust_project_path(self) -> str:
+    def _get_rust_project_path(self, agent_model) -> str:
         """Get the path for the Rust project"""
         return os.path.join(return_env()["tee_build_path"],
-                          LModel.get_model_short_name(self.config.agent_model))
+                          LModel.get_short_name(agent_model))
 
-    def _create_react_model(self, path_dir:str, rust_project_path:str):
+    def _create_react_model(self, path_dir, rust_project_path, agent_model):
         """Create and return a ReActModel instance"""
         return ReActModel(
             env_class=CodeConvertBuildTestScenario,
-            client_model=self.config.agent_model,
+            client_model=agent_model,
             language=self.config.source_language,
             source_project_path=path_dir,
             rust_project_path=rust_project_path,
@@ -476,12 +475,11 @@ class TestAssistance:
         return sum(coverages) / len(coverages)
 
     @staticmethod
-    def class_generator(language, agent_model) -> 'TestAssistance':
+    def class_generator(language) -> 'TestAssistance':
         """
         Generate and return an instance of the appropriate TestAssistance subclass based on the given language.
 
         :param language: A string representing the programming language (e.g., 'java' or 'python')
-        :param agent_model: Optional string representing the agent model
         :return: An instance of the corresponding TestAssistance subclass
         """
         # Dictionary mapping language strings to their respective TestAssistance subclasses 
@@ -489,8 +487,8 @@ class TestAssistance:
             "java": JavaTestAssistance,
             "python": PythonTestAssistance
         }
-        # Return an instance of the appropriate subclass, initialized with the language and agent model
-        return class_dict[language](ConversionConfig(source_language = language, agent_model=agent_model))
+        # Return an instance of the appropriate subclass, initialized with the language
+        return class_dict[language](ConversionConfig(language))
 
 class JavaTestAssistance(TestAssistance):
 
