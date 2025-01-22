@@ -12,6 +12,7 @@ from loguru import logger
 
 from LLM.llmodel import LModel, OpenAIModel
 from LLM.output import Output
+from LLM.scenarios.generate_test_case import GenerateOneTestCaseScenario
 from static.get_env import return_env
 
 
@@ -183,25 +184,25 @@ class CodeDynamic:
         else:
             print(f"The file {file} does not exist and cannot be deleted.")
 
-    # def design_test_case(self, agent:LModel, code) -> str:
-    #     """Generate a single test case using an LLM agent.
-    #
-    #     :param agent: Language model agent to generate test case
-    #     :type agent: LModel
-    #     :param code: Code to generate test case for
-    #     :type code: str
-    #     :returns: Generated test case code
-    #     :rtype: str
-    #     """
-    #     scenario = GenerateOneTestCaseScenario.class_generator(self.config.language)
-    #
-    #     agent.add_message("system", scenario.one_case_system_prompt(f"{self.config.language}"))
-    #
-    #     out_code = agent.query_json(message=scenario.query_prompt(code),
-    #                                 output_format=Output.OutputCodeFormat)
-    #     out_code = out_code.code
-    #
-    #     return out_code
+    def design_test_case(self, agent:LModel, code) -> str:
+        """Generate a single test case using an LLM agent.
+    
+        :param agent: Language model agent to generate test case
+        :type agent: LModel
+        :param code: Code to generate test case for
+        :type code: str
+        :returns: Generated test case code
+        :rtype: str
+        """
+        scenario = GenerateOneTestCaseScenario.class_generator(self.config.language)
+    
+        agent.add_message("system", scenario.one_case_system_prompt(f"{self.config.language}"))
+    
+        out_code = agent.query_json(message=scenario.query_prompt(code),
+                                    output_format=Output.OutputCodeFormat)
+        out_code = out_code.code
+    
+        return out_code
     #
     # def design_test_mul_cases(self, agent:LModel, code) -> list[str]:
     #     """Generate multiple test cases using an LLM agent.

@@ -24,7 +24,7 @@ class BaseTestCaseScenario(Scenario):
                    As a {language} programmer, 
                    I will provide you with a code snippet. 
                    First, make it static. 
-                   Then, write a main function with different test cases to call this function to cover as many branches of the code snippet as possible.
+                   Then, write a main function with different test input to call this function to cover as many line coverage of the code snippet as possible.
                    Make sure the code can be a complete executable program.
                    Please remember to import the necessary dependencies. 
                    If a key is required, please make an attempt to provide one in the corresponding format.
