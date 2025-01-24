@@ -2,361 +2,212 @@ import abc
 import ast
 import os
 import re
+from pathlib import Path
 from abc import abstractmethod
-from typing import Optional, Type
+from typing import Optional, Type, List, Set, Dict, Any, Pattern
+from functools import lru_cache
+
+import numpy as np
+import itertools
+import signal
 
 import javalang
-import pexpect
-import ray
 from loguru import logger
 
 from build.build_dynamic import CodeDynamic
 
 
 class ProgramCode(object):
-    ast_type_map = {
-        "definition" : None,
-        "call" : None,
-    }
-    def __init__(self):
-        self.match_pattern:str = ""
-        self.file_exec:str = ""
+    """Base class for program code analysis and processing."""
+    
+    def __init__(self) -> None:
+        """Initialize ProgramCode with default values."""
+        self.match_pattern: str = ""
+        self.file_exec: str = ""
 
-    def find_spe_files(self, directory):
+    def find_specific_files(self, directory: str) -> List[str]:
         """
-        read specific files
-        :param directory: subdirectory
-        :return:
+        Find all files with the specified extension in the given directory.
+
+        Args:
+            directory (str): Path to the directory to search
+
+        Returns:
+            List[str]: List of file paths matching the extension
         """
-        code_file = []
-        for root, dirs, files in os.walk(directory):
-            for file in files:
-                if file.endswith(f'.{self.file_exec}'):
-                    code_file.append(os.path.join(root, file))
-        return code_file
-
-    @staticmethod
-    def read_code_from_file(file_path):
-        # open new file
-        with open(file_path, 'r', encoding='utf-8') as file:
-            lines = file.readlines()
-        return ''.join(lines)
-
-    @staticmethod
-    @abstractmethod
-    def get_method_block_with_name(method_name):
-        pass
-
-    @staticmethod
-    @abstractmethod
-    def locate_method_path(codes:str, method_name:str) -> str:
-        pass
-
-    @staticmethod
-    @abstractmethod
-    def get_ast_description(codes: str) -> str:
-        pass
-
-    @classmethod
-    def search_code_source(cls, file_path:str, method_name: str):
-        # try to find block in same file
-        codes = cls.read_code_from_file(file_path)
-        match_result = cls.match_fun(codes, cls.get_method_block_with_name(method_name), file_path)
-        if len(match_result) > 0:
-            return match_result[0]['block']
-
-        # can not find in the same file, run ast to catch source path.
-
-        # get code source
-        path_parts = cls.locate_method_path(codes, method_name)
-        # Find the position of 'src' in the root_dir
-        src_index = file_path.find('src')
-        # Extract the portion before 'src'
-        base_dir = file_path[:src_index]
-        new_file_path = os.path.join(base_dir, *path_parts) + '.java'
-
-        codes = cls.read_code_from_file(new_file_path)
-        match_result = cls.match_fun(codes, cls.get_method_block_with_name(method_name), new_file_path)
-        if len(match_result) > 0:
-            return new_file_path, match_result[0]['block']
-
-
-    @classmethod
-    def _read_match_block(cls, file_path):
-        # open new file
-        with open(file_path, 'r', encoding='utf-8') as file:
-            lines = file.readlines()
-        return ''.join(lines)
-
-    @staticmethod
-    def _find_matching_brace(code, start_index):
-        stack = []
-        for i in range(start_index, len(code)):
-            if code[i] == '{':
-                stack.append('{')
-            elif code[i] == '}':
-                stack.pop()
-                if not stack:
-                    return i
-        return -1
-
-    @staticmethod
-    @abc.abstractmethod
-    def test_build(path_dir:str, env) -> str:
-        pass
-
-    @staticmethod
-    @abc.abstractmethod
-    def match_fun(code_text: str, file_path: str, method_pattern):
-        raise AttributeError('Sub class does not implement this function.')
-
-    @staticmethod
-    @abc.abstractmethod
-    def match_fun_block_with_name(texts:str, file_path:str, name:str):
-        raise AttributeError('Sub class does not implement this function.')
-
-    @staticmethod
-    @abc.abstractmethod
-    def match_fun_block(texts:str, file_path:str):
-        raise AttributeError('Sub class does not implement this function.')
-
-    @staticmethod
-    @abc.abstractmethod
-    def remove_comments(texts:str):
-        raise AttributeError('Sub class does not implement this function.')
-
-class JavaCode(ProgramCode):
-
-    match_pattern = r'\b(public|protected|private|static|final|\s)*[\w<>\[\]]+\s+\w+\s*\([^)]*\)\s*\{'
-    #     #r'\b(public|protected|private|static|\s)*[\w<>\[\]]+\s+\w+\s*\([^)]*\)\s*{'
-
-    ast_type_map = {
-        "definition" : "method_declaration",
-        "call" : "method_invocation",
-    }
-
-    def __init__(self):
-        super().__init__()
-        self.file_exec = 'java'
-
-    @staticmethod
-    def match_fun_block(code_text: str, file_path: str):
-        """
-        read all function in code_text.
-        :param code_text:
-        :param file_path:
-        :return:
-        """
-        method_pattern = re.compile(JavaCode.match_pattern)
-
-        return JavaCode.match_fun(code_text, file_path, method_pattern)
-
-    @staticmethod
-    def match_fun(code_text: str, file_path: str, method_pattern):
-        # Find all potential method signatures
-        matches = method_pattern.finditer(code_text)
-        if "computeSHA1" in code_text:
-            print()
-        methods = []
-
-        for match in matches:
-            start = match.start()
-            # Find the corresponding closing brace
-            if not JavaCode.check_special_rule(code_text[match.start():match.end()]):
-                end = JavaCode._find_matching_brace(code_text, match.end() - 1)
-                if end != -1:
-                    methods.append(
-                        {"block": code_text[start:end + 1], "start": start, "end": end + 1, "path": file_path}
-                    )
-        return methods
-
-    @staticmethod
-    def check_special_rule(code_text:str):
-        if "else if" in code_text:
-            return True
-        return False
-
-
-    @staticmethod
-    def get_method_block_with_name(method_name):
-       return rf'\b(public|protected|private|static|\s)*[\w<>\[\]]+\s+{method_name}\s*\([^)]*\)\s*\{{'
-
-    @staticmethod
-    def remove_comments(code):
-        # 去除单行注释
-        code = re.sub(r'//.*', '', code)
-        # 去除多行注释
-        code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
-        return code
-
-    @staticmethod
-    def locate_method_path(codes, method_name):
-        # AST tree extract
-        tree = javalang.parse.parse(codes)
-
-        # check where is method_name
-        for path, node in tree.filter(javalang.tree.MethodInvocation):
-            if node.member == method_name:
-                # find qualifier's source
-                for imp in tree.imports:
-                    if imp.path.endswith(node.qualifier):
-                        return imp.path
-        return None
-
-    @staticmethod
-    def find_method_in_dir(root_dir):
-        target_dir = os.path.join(root_dir, 'com', 'hippo')
-        for root, dirs, files in os.walk(target_dir):
-            for file in files:
-                if file.endswith(".java"):
-                    with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
-                        if 'class MyHash' in f.read():
-                            print(f"Found MyHash in: {os.path.join(root, file)}")
-
-    @staticmethod
-    def get_ast_description(codes):
-        pass
-
-    @staticmethod
-    def test_build(path_dir, env):
-        cmd = ["javac", "Test.java"]
-        return CodeDynamic.run_cmd(cmd, exe_env=path_dir)
-
-
-class PythonCode(ProgramCode):
-    @staticmethod
-    def locate_method_path(codes: str, method_name: str) -> str:
-        pass
-
-    @staticmethod
-    def get_ast_description(codes: str) -> str:
-        pass
-
-    @staticmethod
-    def match_fun_block_with_name(texts: str, file_path: str, name: str):
-        pass
-
-    @staticmethod
-    def remove_comments(texts: str):
-        pass
-
-    match_pattern = r'def\s+\w+\s*\(.*?\):\s*((?:\n\s+.+)+)'
-
-    ast_type_map = {
-        "definition": "function_definition",
-        "call": "call",
-    }
-
-    def __init__(self):
-        super().__init__()
-        self.file_exec = 'py'
-
-    @staticmethod
-    def match_fun_block(code_text: str, file_path: str):
-        """
-                Matches a function block within the provided code text.
-
-                This method utilizes the `PythonCode.match_fun` function to identify
-                and match a function block in the given code text. The `code_text`
-                parameter is currently not used in the matching process, as an empty
-                string is passed to `match_fun`.
-
-                :param code_text: The code text in which to search for a function block.
-                :type code_text: str
-                :param file_path: The path of the file containing the code.
-                :type file_path: str
-                :return: The result of the `PythonCode.match_fun` function call.
-                :rtype: Depends on the implementation of `PythonCode.match_fun`
-                """
-        try:
-            return PythonCode.match_fun("", file_path, "")
-        except Exception as e:
+        if not os.path.exists(directory):
+            logger.warning(f"Directory does not exist: {directory}")
             return []
 
-    @staticmethod
-    def match_fun(code_text: str, file_path: str, method_pattern: str) -> list:
+        return [
+            str(path)
+            for path in Path(directory).rglob(f"*.{self.file_exec}")
+            if path.is_file()
+        ]
+    
+    def ast_code_from_files(self, file_paths: List[str]) -> List[str]:
         """
-                Matches and extracts function blocks from a Python source file.
+        Extract code blocks from multiple files using the provided pattern matcher.
 
-                This method reads the source code from the specified file path,
-                parses it into an Abstract Syntax Tree (AST), and iterates over
-                the nodes to identify function definitions. It extracts the source
-                code of each function, excluding those named "main", and returns
-                a list of dictionaries containing the function's source code block,
-                start line, end line, and file path.
+        Args:
+            file_paths (List[str]): List of file paths to process
+            code_pattern (Any): Pattern matcher object with match_fun_block method
 
-                :param code_text: The code text to be matched (currently unused).
-                :type code_text: str
-                :param file_path: The path to the Python source file.
-                :type file_path: str
-                :param method_pattern: A pattern to match methods (currently unused).
-                :type method_pattern: str
-                :return: A list of dictionaries, each containing details of a function block.
-                :rtype: list of dict
-                :raises FileNotFoundError: If the specified file does not exist.
-                :raises SyntaxError: If the source code contains syntax errors.
-
-                Each dictionary in the returned list contains:
-                    - "block": The source code of the function.
-                    - "start_line": The starting line number of the function in the file.
-                    - "end_line": The ending line number of the function in the file.
-                    - "path": The path to the source file.
+        Returns:
+            List[str]: List of matched code blocks
         """
-        with open(file_path, 'r', encoding="utf-8") as file:
-            source = file.read()
+        if not file_paths:
+            return []
 
-        # Parse the source code into an AST
-        tree = ast.parse(source)
+        return list(itertools.chain.from_iterable(
+            self.extract_leaf_node(file_path)
+            for file_path in file_paths
+        ))
+        
+    
+    def extract_leaf_node(self, file_path: str) -> List[str]:
+        """
+        Extract code blocks from a single file using the provided pattern matcher.
 
-        # Iterate over all nodes in the AST
-        functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
+        Args:
+            file_path (str): Path to the file to process
+            code_pattern (Any): Pattern matcher object with match_fun_block method
 
-        source_lines = source.splitlines()
+        Returns:
+            List[str]: List of matched code blocks
+        """
+        if not os.path.exists(file_path):
+            logger.warning(f"File does not exist: {file_path}")
+            return []
 
-        methods = []
-        for func in functions:
-            # Get the start and end line numbers of the function
-            start_line = func.lineno - 1
-            end_line = func.end_lineno if hasattr(func, 'end_lineno') else start_line
+    
+        # Try UTF-8 first, fallback to ISO-8859-1 if needed
+        encodings = ['utf-8', 'iso-8859-1']
+        for encoding in encodings:
 
-            # Extract the function body from the source lines
-            func_source = "\n".join(source_lines[start_line:end_line])
-            if func.name == "main":
-                continue
-            methods.append(
-                {"block": func_source, "start_line": start_line, "end_line": end_line + 1, "path": file_path}
-            )
+            with open(file_path, 'r', encoding=encoding) as file:
+                texts = file.read()
+                match_result = self.match_leaf_block(texts)
+                return match_result if match_result is not None else []
+    
+    @abstractmethod
+    def match_leaf_block(self, code: str) -> List[str]:
+        """
+        Match leaf blocks in the given code.
+        A leaf block is a function/method that doesn't call other functions/methods.
 
-        return methods
+        Args:
+            code (str): The code to analyze
 
-    @staticmethod
-    def get_method_block_with_name(method_name):
-        return rf'\b(public|protected|private|static|\s)*[\w<>\[\]]+\s+{method_name}\s*\([^)]*\)\s*\{{'
+        Returns:
+            List[str]: List of matched leaf blocks
+        """
+        try:
+            tree = ast.parse(code)
+            leaf_functions = []
 
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    # Check if this function calls other functions
+                    has_function_calls = any(
+                        isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                        for n in ast.walk(node)
+                    )
 
-def determine_language_by_extension(filename) -> Type[ProgramCode]:
-    # Map of file extensions to programming languages
-    extension_to_language = {
-        '.py': PythonCode,
-        '.python': PythonCode,
-        '.java': JavaCode,
-    }
+                    if not has_function_calls:
+                        # Get the function's source code
+                        function_code = ast.get_source_segment(code, node)
+                        if function_code:
+                            leaf_functions.append(function_code)
 
-    # Get the file extension
-    _, extension = os.path.splitext(filename)
+            return leaf_functions
+        except SyntaxError:
+            return []
+    
+class JavaCode(ProgramCode):
+    def __init__(self) -> None:
+        super().__init__()
+        self.file_exec = "java"
+        
+    def match_leaf_block(self, code: str) -> List[str]:
+        try:
+            # Parse Java code into AST
+            tree = javalang.parse.parse(code)
 
-    # Return the corresponding programming language
-    return extension_to_language.get(extension, 'Unknown')
+            # First pass: collect all user-defined method names
+            method_names = set()
+            for path, node in tree:
+                if isinstance(node, javalang.tree.MethodDeclaration):
+                    # Include parameter count to handle method overloads
+                    method_names.add(f"{node.name}:{len(node.parameters)}")
 
-def determine_language_name_by_extension(filename) -> str:
-    # Map of file extensions to programming languages
-    extension_to_language = {
-        '.py': 'python',
-        '.java': 'java',
-    }
+            # Second pass: find leaf methods
+            leaf_methods = []
+            for path, node in tree:
+                if isinstance(node, javalang.tree.MethodDeclaration):
+                    # Check if this method calls any user-defined methods
+                    has_user_method_calls = any(
+                        isinstance(n, javalang.tree.MethodInvocation) and 
+                        n.member in method_names
+                        for n in node.children
+                    )
 
-    # Get the file extension
-    _, extension = os.path.splitext(filename)
+                    if not has_user_method_calls:
+                        # Get the method's source code
+                        try:
+                            # Get the method's starting line
+                            start_line = node.position.line - 1
+                            lines = code.splitlines()
+                            
+                            # Find the method's opening brace
+                            method_start = start_line
+                            while method_start < len(lines) and '{' not in lines[method_start]:
+                                method_start += 1
+                            
+                            # Find the matching closing brace
+                            brace_count = 1
+                            method_end = method_start + 1
+                            while method_end < len(lines) and brace_count > 0:
+                                brace_count += lines[method_end].count('{')
+                                brace_count -= lines[method_end].count('}')
+                                method_end += 1
+                            
+                            # Extract the complete method
+                            method_code = "\n".join(lines[start_line:method_end])
+                        except (AttributeError, IndexError):
+                            continue
+                        leaf_methods.append(method_code)
+                       
+            return leaf_methods
+        except (javalang.parser.JavaSyntaxError, javalang.tokenizer.LexerError) as e:
+            logger.warning(f"Error parsing Java code: {e}")
+            logger.debug(f"Problematic code segment: {code[:50]}...")
+            return []
+        
+class PythonCode(ProgramCode):
+    def __init__(self) -> None:
+        super().__init__()
+        self.file_exec = "py"
+        
+    def match_leaf_block(self, code: str) -> List[str]:
+        try:
+            tree = ast.parse(code)
+            leaf_functions = []
 
-    # Return the corresponding programming language
-    return extension_to_language.get(extension, 'Unknown')
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    # Check if this function calls other functions
+                    has_function_calls = any(
+                        isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                        for n in ast.walk(node)
+                    )
+
+                    if not has_function_calls:
+                        # Get the function's source code
+                        function_code = ast.get_source_segment(code, node)
+                        if function_code:
+                            leaf_functions.append(function_code)
+
+            return leaf_functions
+        except SyntaxError:
+            return []

@@ -8,6 +8,6 @@ if __name__ == '__main__':
     env = return_env()
     project_path = os.path.join(base_path, "ym")
 
-    test_assistance = TestAssistance.class_generator("python", "gpt-4o")
+    test_assistance = TestAssistance.class_generator("python")
 
-    test_assistance.convert_and_build(project_path)
+    test_assistance.convert_and_build(project_path, agent_model = "gpt-4o")
