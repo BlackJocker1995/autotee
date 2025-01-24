@@ -28,11 +28,11 @@ def query_sensitive(agent: LModel, dir_item: str, in_name: str, out_name: str) -
             continue
 
         # Check first line (only in dataset generation)
-        if not any(sub in block.splitlines()[0].lower() for sub in
-                   ['token', 'password', 'credential', 'hash', 'cyber', 'key', 'serialize', 'enc', 'dec', 'chip',
-                    'verif', 'sign']):
-            continue
-
+        # if not any(sub in block.splitlines()[0].lower() for sub in
+        #            ['token', 'password', 'credential', 'hash', 'cyber', 'key', 'serialize', 'enc', 'dec', 'chip',
+        #             'verif', 'sign']):
+        #     continue
+        
         agent.re_init_chat()
 
         # Ask what LLM can find

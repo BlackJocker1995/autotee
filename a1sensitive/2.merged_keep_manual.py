@@ -25,14 +25,13 @@ def process_sen_votes(sen_votes):
     retained_votes = []
     for vote in tqdm(sen_votes):
         # Remove leading tabs and format the block for better readability
-        # Remove leading tabs and format the block for better readability
         formatted_block = textwrap.dedent(vote['block'])
 
         # Update the block in the dictionary
         vote['block'] = formatted_block
 
         # Print the formatted dictionary
-        print( vote['block'])
+        print(vote['block'])
         while True:
             user_input = input("Do you want to retain this vote? (y/n): ").strip().lower()
             if user_input in ['y', 'n']:
@@ -44,7 +43,15 @@ def process_sen_votes(sen_votes):
     return retained_votes
 
 def main(overwrite=False):
-    directory_path = "/home/rdhan/data/dataset/java"
+    """Process sensitive votes for specified language"""
+    
+    language = "java"
+
+    if language == 'java':
+        directory_path = "/home/rdhan/data/dataset/java"
+    else:
+        directory_path = "/home/rdhan/data/dataset/python"
+
     dirs = list_directories(directory_path)
 
     for dir_item in dirs:
@@ -55,11 +62,10 @@ def main(overwrite=False):
             logger.info(f"Skipping {dir_item} as 'sen_manual.json' file already exists.")
             continue
 
-        sen_votes = read_code_block(os.path.join(directory_path,dir_item), "sen_vote")
+        sen_votes = read_code_block(os.path.join(directory_path, dir_item), "sen_vote")
         logger.info(f"This project have {len(sen_votes)} codes related to sensitive.")
         processed_votes = process_sen_votes(sen_votes)
         save_code_block(os.path.join(directory_path, dir_item), processed_votes, "sen_manual")
 
 if __name__ == "__main__":
     main()
-

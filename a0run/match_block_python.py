@@ -2,7 +2,7 @@ import os
 import ray
 
 NUM_THREADS = 6  # Default number of threads, can be adjusted
-from static.code_match import JavaCode, PythonCode
+from static.code_match import PythonCode
 from static.projectUtil import save_code_block, list_directories
 from loguru import logger
 
