@@ -12,7 +12,7 @@ from loguru import logger
 
 from LLM.llmodel import LModel, OpenAIModel
 from LLM.output import Output
-from LLM.scenarios.generate_test_case import GenerateOneTestCaseScenario
+from LLM.scenarios.generate_test_case import GenerateMulTestCaseScenario, GenerateOneTestCaseScenario
 from static.get_env import return_env
 
 
@@ -184,46 +184,33 @@ class CodeDynamic:
         else:
             print(f"The file {file} does not exist and cannot be deleted.")
 
-    def design_test_case(self, agent:LModel, code) -> str:
-        """Generate a single test case using an LLM agent.
-    
-        :param agent: Language model agent to generate test case
+    def design_test_cases(self, agent:LModel, code: str, multiple: bool = False) -> str:
+        """Generate one or multiple test cases using an LLM agent.
+        
+        :param agent: Language model agent to generate test cases
         :type agent: LModel
-        :param code: Code to generate test case for
+        :param code: Code to generate test cases for 
         :type code: str
-        :returns: Generated test case code
+        :param multiple: Whether to generate multiple test cases, defaults to False
+        :type multiple: bool
+        :returns: Single test case string if multiple=False, list of test cases if multiple=True
         :rtype: str
         """
-        scenario = GenerateOneTestCaseScenario.class_generator(self.config.language)
-    
-        agent.add_message("system", scenario.one_case_system_prompt(f"{self.config.language}"))
-    
+        # Choose scenario based on multiple flag
+        if multiple:
+            scenario = GenerateMulTestCaseScenario.class_generator(self.config.language, "mul_case")
+            system_prompt = scenario.mul_case_system_prompt(self.config.language) 
+        else:
+            scenario = GenerateOneTestCaseScenario.class_generator(self.config.language, "one_case")
+            system_prompt = scenario.one_case_system_prompt(self.config.language)
+            
+        # Add system prompt and query model
+        agent.add_message("system", system_prompt)
         out_code = agent.query_json(message=scenario.query_prompt(code),
-                                    output_format=Output.OutputCodeFormat)
-        out_code = out_code.code
-    
-        return out_code
-    #
-    # def design_test_mul_cases(self, agent:LModel, code) -> list[str]:
-    #     """Generate multiple test cases using an LLM agent.
-    #
-    #     :param agent: Language model agent to generate test cases
-    #     :type agent: LModel
-    #     :param code: Code to generate test cases for
-    #     :type code: str
-    #     :returns: List of generated test case codes
-    #     :rtype: list[str]
-    #     """
-    #     scenario = GenerateMulTestCaseScenario.class_generator(self.config.language)
-    #
-    #     agent.add_message("system", scenario.mul_case_system_prompt(f"{self.config.language}"))
-    #
-    #     out_codes = agent.query_json(message=scenario.query_prompt(code),
-    #                                 output_format=Output.OutputCodeFormat)
-    #
-    #     out_code_list = out_codes.code
-    #
-    #     return out_code_list
+                                  output_format=Output.OutputCodeFormat)
+        
+        # Return appropriate format based on multiple flag
+        return out_code.code
 
     def build_test_case(self, agent: LModel, max_rounds=2):
         """Build and test a test case using an LLM agent.

@@ -57,10 +57,10 @@ class TestAssistance:
             is_multiple: Whether to generate multiple test cases
         """
         for dir_item in self.list_source_project(project_path):
-            try:
-                self._process_test_dir(dir_item, agent, overwrite, is_multiple)
-            except Exception as e:
-                logger.error(f"Error processing {dir_item}: {str(e)}")
+            #try:
+            self._process_test_dir(dir_item, agent, overwrite, is_multiple)
+            # except Exception as e:
+            #     logger.error(f"Error processing {dir_item}: {str(e)}")
 
     def _should_process_test_file(self, test_file, overwrite, main_file):
         """Check if test file should be processed"""
