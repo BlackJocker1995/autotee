@@ -221,7 +221,8 @@ class TestAssistance:
         dirs = self.list_source_project(project_path)
         for dir_item in dirs:
             # create agent
-            agent = LModel.class_generator(model_name)
+            config = LLMConfig(provider='openai', model_name=model_name)
+            agent = LLModel.from_config(config)
 
             # Skip directories that do not contain "_java" in their name
             if (not "_rust_" in dir_item) or ("_yes" in dir_item) or ("_no" in dir_item):
