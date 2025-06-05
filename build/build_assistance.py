@@ -13,7 +13,6 @@ from langchain_community.agent_toolkits import FileManagementToolkit
 from langchain_core.tools import BaseTool
 from langchain.tools import tool
 import re
-import os
 
 from LLM.llmodel import LLMConfig, LLModel
 from LLM.output import Output
@@ -135,6 +134,8 @@ class TestAssistance:
                 logger.error(f"Init {path_dir} at first")
                 continue
 
+            self.set_project_path(str(path_dir))
+
             if self.code_dynamic.is_build_target_exit(path_dir, file_name) and not overwrite:
                 continue
 
@@ -199,14 +200,14 @@ class TestAssistance:
             rust_path_dir = os.path.join(code_file_path, f"{hash_index}_rust_{name}")
             failed_path_dir = os.path.join(code_file_path, f"{hash_index}_rust_{name}_failed")
 
-            # if not overwrite and (os.path.exists(rust_path_dir) or os.path.exists(failed_path_dir)):
-            #     logger.info(f"Skip this {rust_path_dir}")
-            #     continue
+            if not overwrite and (os.path.exists(rust_path_dir) or os.path.exists(failed_path_dir)):
+                logger.info(f"Skip this {rust_path_dir}")
+                continue
 
-            # # Check if the main Java file exists; if not, log a warning and skip
-            # if not os.path.exists(test_file):
-            #     logger.warning(f"Main {self.source_language} file does not exist, finish previous step first!")
-            #     continue
+            # Check if the main Java file exists; if not, log a warning and skip
+            if not os.path.exists(test_file):
+                logger.warning(f"Main {self.source_language} file does not exist, finish previous step first!")
+                continue
 
             # Open and read the Java main file
             with open(test_file, "r", encoding="utf-8") as f:
@@ -479,8 +480,6 @@ class TestAssistance:
             logger.warning("No coverage data found")
             return 0.0
             
-        return sum(coverages) / len(coverages)
-
     @staticmethod
     def class_generator(language) -> 'TestAssistance':
         """
