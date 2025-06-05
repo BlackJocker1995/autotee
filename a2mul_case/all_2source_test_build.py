@@ -2,16 +2,14 @@ import os
 
 from loguru import logger
 
-from LLM.llmodel import OpenAIModel
+from LLM.LLModel import LLMConfig, LLModel
 from build.build_assistance import TestAssistance
 from static.projectUtil import list_directories
 
-
-
-
 if __name__ == '__main__':
     # codescan = OllamaModel("qwen2.5-coder:32b")
-    codescan = OpenAIModel("gpt-4o")
+    config = LLMConfig(provider="openai", model="gpt-4o")
+    codescan = LLModel.from_config(config)
     base_path = "/home/rdhan/data/dataset/python_mul_case"
 
     overwrite = False
@@ -23,6 +21,6 @@ if __name__ == '__main__':
 
         project_path = os.path.join(base_path, dir_item)
 
-        test_assistance = TestAssistance.class_generator("python", "gpt-4o")
+        test_assistance = TestAssistance.class_generator("python")
 
         test_assistance.build_test_mul(project_path, "test.py", overwrite)

@@ -7,9 +7,9 @@ from dataclasses import dataclass, field
 from loguru import logger
 from .conversion_examples import JAVA_CONVERSION_EXAMPLES, PYTHON_CONVERSION_EXAMPLES
 
-from LLM.llmodel import LLMConfig, LLModel
+from LLM.LLModel import LLMConfig, LLModel
 from LLM.output import Output
-from LLM.react import ReActModel
+# from LLM.react import ReActModel
 from LLM.scenarios.code_convert_test_build import CodeConvertBuildTestScenario
 from build.build_dynamic import RustDynamic, CodeDynamic, BuildConfig
 from static.code_match import PythonCode
@@ -44,7 +44,7 @@ class TestAssistance:
         dirs = list_directories(code_file_path)
         return [it for it in dirs if f"_{self.config.source_language}" in it]
 
-    def _add_test_cases(self, agent: LModel, 
+    def _add_test_cases(self, agent: LLModel, 
                        project_path: Path,
                        overwrite: bool, 
                        is_multiple: bool = False) -> None:
@@ -76,7 +76,7 @@ class TestAssistance:
     
     
     def _process_test_dir(self, dir_item: Path,
-                         agent: LModel,
+                         agent: LLModel,
                          overwrite: bool,
                          is_multiple: bool) -> None:
 
@@ -167,7 +167,7 @@ class TestAssistance:
         """
 
         # short name
-        name = LModel.get_short_name(agent_model)
+        name = LLModel.get_short_name(agent_model)
         source_path = os.path.join(f"/home/rdhan/tmp/{name}/tee")
 
         code_file_path = os.path.join(project_path, "code_file")
@@ -318,19 +318,25 @@ class TestAssistance:
     def _get_rust_project_path(self, agent_model) -> str:
         """Get the path for the Rust project"""
         return os.path.join(return_env()["tee_build_path"],
-                          LModel.get_short_name(agent_model))
+                          LLModel.get_short_name(agent_model))
 
     def _create_react_model(self, path_dir, rust_project_path, agent_model):
-        """Create and return a ReActModel instance"""
-        return ReActModel(
-            env_class=CodeConvertBuildTestScenario,
-            client_model=agent_model,
+        """Create and return a langchain agent (CompiledGraph) instance"""
+        # 构造 LLM
+        llm_config = LLMConfig(provider="openai", model=agent_model)  # 可根据实际provider调整
+        llm = LLModel.from_config(llm_config)
+        # 构造 actions/tools
+        action_object = CodeConvertBuildTestScenario.Actions(
             language=self.config.source_language,
             source_project_path=path_dir,
             rust_project_path=rust_project_path,
             project_path=rust_project_path,
             project_name="tee"
         )
+        methods_name, _ = CodeConvertBuildTestScenario.get_class_method_info()
+        tools = [getattr(action_object, name) for name in methods_name]
+        agent = llm.create_agent(tools)
+        return agent
 
     def _analyze_code(self, model, code) -> bool:
         """Analyze the source code and add conversion examples"""
@@ -386,7 +392,7 @@ class TestAssistance:
             
         return -1
 
-    def _rust_test_add(self, codescan: Type[LModel], rust_code: str, code: str = "") -> str:
+    def _rust_test_add(self, codescan: Type[LLModel], rust_code: str, code: str = "") -> str:
         logger.debug(rust_code)
         message = ("This function code is in lib.rs of tee project. Write a main function."
                    # "The Rust program in main.rs reads input from the command line and forwards it to lib.rs."

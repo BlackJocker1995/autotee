@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 import pexpect
 from loguru import logger
 
-from LLM.llmodel import LLMConfig, LLModel
+from LLM.LLModel import LLMConfig, LLModel
 from LLM.output import Output
 from LLM.scenarios.generate_test_case import GenerateMulTestCaseScenario, GenerateOneTestCaseScenario
 from static.get_env import return_env

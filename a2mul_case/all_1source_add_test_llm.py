@@ -2,7 +2,7 @@ import os
 
 from loguru import logger
 
-from LLM.llmodel import LLMConfig, LLModel
+from LLM.LLModel import LLMConfig, LLModel
 from build.build_assistance import TestAssistance
 from static.projectUtil import list_directories
 

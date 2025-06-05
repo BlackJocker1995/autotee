@@ -5,7 +5,7 @@ from typing import Type
 from loguru import logger
 from tqdm import tqdm
 
-from LLM.llmodel import OllamaModel, LModel
+from LLM.LLModel import OllamaModel, LLModel
 from LLM.scenarios.sensitive_search import SensitiveSearchScenario
 from static.projectUtil import read_code_block, save_code_block, list_directories
 
@@ -16,7 +16,7 @@ def extract_content_fun(text):
     return matches
 
 
-def query_sensitive(codescan:Type[LModel], dir_item:str, in_name:str, out_name:str) -> None:
+def query_sensitive(codescan:Type[LLModel], dir_item:str, in_name:str, out_name:str) -> None:
     codes = read_code_block(dir_item, in_name)
     out = []
     for code in tqdm(codes, desc="Processing", unit="item", mininterval=1):

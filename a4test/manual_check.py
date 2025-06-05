@@ -5,7 +5,7 @@ from typing import Type
 from loguru import logger
 from tqdm import tqdm
 
-from LLM.llmodel import LModel, OllamaModel, OpenAIModel
+from LLM.LLModel import LLModel, OllamaModel, OpenAIModel
 from LLM.scenarios.sensitive_search import SensitiveSearchScenario
 
 
@@ -14,7 +14,7 @@ def read_combined_file(file_path):
         combined_list = json.load(in_file)
     return combined_list
 
-def query_sensitive(codescan:Type[LModel], code:str) -> bool:
+def query_sensitive(codescan:Type[LLModel], code:str) -> bool:
     # clear message at first
     codescan.re_init_chat()
 

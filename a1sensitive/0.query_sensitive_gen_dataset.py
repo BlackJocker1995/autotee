@@ -4,7 +4,7 @@ import re
 from loguru import logger
 from tqdm import tqdm
 
-from LLM.llmodel import LLMConfig, LLModel
+from LLM.LLModel import LLMConfig, LLModel
 from LLM.output import Output
 from LLM.scenarios.sensitive_search import SensitiveSearchScenario
 from static.projectUtil import read_code_block, list_directories

@@ -1,4 +1,4 @@
-from LLM.llmodel import OpenAIModel
+from LLM.LLModel import OpenAIModel
 from .fetcher.docsrs import DocsRsFetcher
 
 
