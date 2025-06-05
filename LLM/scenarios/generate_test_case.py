@@ -1,6 +1,4 @@
-from LLM.action import Scenario
-
-class BaseTestCaseScenario(Scenario):
+class BaseTestCaseScenario():
     test_case_example = ""
 
     @classmethod

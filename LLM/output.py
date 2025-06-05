@@ -1,40 +1,37 @@
-from typing import List, Optional
+from typing import List, Optional, Union
 from pydantic import BaseModel, Field
 
-from LLM.action import Scenario
-
-class BaseOutput(BaseModel):
-    """Base class for all output types."""
-    class Config:
-        extra = "forbid"
-
 class Output:
-    """Collection of output format definitions."""
-    
-    class StructureAnswer(BaseOutput):
-        """Basic string result output."""
-        result: str = Field(..., description="The result string")
+    """Unified output format definitions."""
 
-    class OutputCodeFormat(BaseModel):
+    class String(BaseModel):
+        """Single string result."""
+        result: str
+
+    class StringList(BaseModel):
+        """List of strings result."""
+        result: List[str]
+
+    class Code(BaseModel):
+        """Single code block."""
         code: str
 
-    class OutputStrListFormat(BaseModel):
-        result: list[str]
+    class CodeList(BaseModel):
+        """Multiple code blocks."""
+        multiple_codes_list: List[str]
 
-    class OutputCodeListFormat(BaseModel):
-        multiple_codes_list: list[str]
-
-    class OutputBoolFormat(BaseModel):
+    class Bool(BaseModel):
+        """Boolean answer."""
         answer: bool
 
-    class RustCodeWithDepend(BaseOutput):
-        """Rust code output with dependencies."""
-        code: str = Field(..., description="Rust source code")
-        dependencies: List[str] = Field(default_factory=list, description="Required dependencies")
+    class CodeWithDependencies(BaseModel):
+        """Code with dependencies."""
+        code: str
+        dependencies: List[str] = Field(default_factory=list)
 
-    class ReactOutputForm(BaseOutput):
-        """ReAct framework output format."""
-        thought: str = Field(..., description="Reasoning process")
-        action: Optional[str] = Field(None, description="Action to take")
-        argument: Optional[str | List[str]] = Field(None, description="Action arguments")
-        consistent: bool = Field(..., description="Whether output is consistent")
+    class ReAct(BaseModel):
+        """ReAct output format."""
+        thought: str
+        action: Optional[str] = None
+        argument: Optional[Union[str, List[str]]] = None
+        consistent: bool

@@ -4,7 +4,7 @@ import re
 from loguru import logger
 from tqdm import tqdm
 
-from LLM.LLModel import LLMConfig, LLModel
+from LLM.llmodel import LLMConfig, LLModel
 from LLM.output import Output
 from LLM.scenarios.sensitive_search import SensitiveSearchScenario
 from static.projectUtil import read_code_block, list_directories
@@ -38,7 +38,7 @@ def query_sensitive(agent: LLModel, dir_item: str, in_name: str, out_name: str) 
         if "Yes" not in chat.invoke({"input": SensitiveSearchScenario.get_question1() + f"``` {block} ```"}):
             continue
 
-        chat_json = agent.create_chat(system_prompt="", output_format=Output.StructureAnswer)
+        chat_json = agent.create_chat(system_prompt="", output_format=Output.String)
         result_json = chat_json.invoke({"input": SensitiveSearchScenario.get_question3()})
         if not result_json or getattr(result_json, "result", ['']) == ['']:
             continue
@@ -48,7 +48,7 @@ def query_sensitive(agent: LLModel, dir_item: str, in_name: str, out_name: str) 
 
         sensitive_dict = {}
         for type_item in type_list:
-            chat_type = agent.create_chat(system_prompt="", output_format=Output.OutputStrListFormat)
+            chat_type = agent.create_chat(system_prompt="", output_format=Output.StringList)
             result_json = chat_type.invoke({"input": SensitiveSearchScenario.get_question4(type_item)})
             if result_json and getattr(result_json, "result", None):
                 sensitive_dict[type_item] = result_json.result
@@ -67,7 +67,7 @@ if __name__ == '__main__':
     agent = LLModel.from_config(config)
     overwrite = False
     in_name = f"java"
-    out_name = f"{agent.get_description()}_sen"
+    out_name = f"{agent.get_short_name()}_sen"
 
     dirs = list_directories("/home/rdhan/data/dataset/java")
 

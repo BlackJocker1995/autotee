@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 import pexpect
 from loguru import logger
 
-from LLM.LLModel import LLMConfig, LLModel
+from LLM.llmodel import LLMConfig, LLModel
 from LLM.output import Output
 from LLM.scenarios.generate_test_case import GenerateMulTestCaseScenario, GenerateOneTestCaseScenario
 from static.get_env import return_env
@@ -250,7 +250,9 @@ class CodeDynamic:
         :raises IOError: If unable to read/write the file
         :raises RuntimeError: If LLM fails to generate fixes
         """
-        agent = OpenAIModel("gpt-4o")
+        config = LLMConfig(provider="openai", model="gpt-4o")
+        agent = LLModel.from_config(config)
+        runnable = agent.create_chat()
         for i in range(max_round):
             # read
             code = self.read_file_code(file_name)
@@ -261,8 +263,9 @@ class CodeDynamic:
                 return True
             else:
                 logger.info("Try build again.")
-                result = agent.query_json(code + f"{output}, if code use log output, you can change to print",
-                                          Output.OutputCodeFormat)
+                response = runnable.invoke({"input": code + f"{output}, if code use log output, you can change to print"})
+                from LLM.output import Output
+                result = Output.OutputCodeFormat.parse_raw(response.text)
                 with open(os.path.join(self.config.project_path, file_name), "w", encoding="utf-8") as f:
                     f.write(result.code)
         return False

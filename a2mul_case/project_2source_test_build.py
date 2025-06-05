@@ -10,7 +10,7 @@ if __name__ == '__main__':
     env = return_env()
     project_path = os.path.join(base_path, env["BUILD_TARGET"])
 
-    overwrite = False
+    overwrite = True
 
     test_assistance = TestAssistance.class_generator("java")
 

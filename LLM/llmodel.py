@@ -120,15 +120,34 @@ class LLModel(ABC):
         )
        
 
-    def get_description(self) -> str:
+    @classmethod
+    def get_short_name(cls,model_client:str) -> str:
         """
-        Returns a description of the LLM model.
-        Returns:
-            str: A description of the LLM model, suitable for use as a directory name.
+        Get the short name of the model client.
+        :param model_client: The name of the model client.
+        :type model_client: str
+        :return: The short name of the model client.
+        :rtype: str
         """
-        # Replace characters potentially problematic in directory names (like '.') with underscores.
-        safe_model_name = self.config.model.replace('.', '_').replace('/', '_').replace(':', '-')
-        return f"{self.provider}_{safe_model_name}"
+        # Define a dictionary mapping model names to their short forms
+        class_dict = {
+            "gpt": "gpt",
+            "qwen2.5": "qwen2.5",
+            "qwen": "qwen",
+            "llama": "llama",
+            "deepseek-chat": "deepseek",
+            "deepseek-r1": "deepseek-r1",
+        }
+
+        # Iterate over each key in the dictionary
+        for key in class_dict:
+            # Check if the current key is a substring of the model_client string
+            if key in model_client:
+                # If found, return the corresponding value from the dictionary
+                return class_dict[key]
+
+        # If no keys are found in model_client, raise an exception
+        raise ValueError(f"Unknown model name: {model_client}")
 
     @classmethod
     def from_config(cls, config: "LLMConfig") -> "LLModel":

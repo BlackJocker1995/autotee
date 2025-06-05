@@ -5,7 +5,7 @@ from typing import Type
 from loguru import logger
 from tqdm import tqdm
 
-from LLM.LLModel import OllamaModel, LLModel
+from LLM.llmodel import OllamaModel, LLModel
 from LLM.scenarios.sensitive_search import SensitiveSearchScenario
 from static.projectUtil import read_code_block, save_code_block, list_directories
 

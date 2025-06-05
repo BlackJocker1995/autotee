@@ -3,7 +3,7 @@ import os
 
 from loguru import logger
 
-from LLM.LLModel import LLMConfig, LLModel
+from LLM.llmodel import LLMConfig, LLModel
 from LLM.output import Output
 from LLM.scenarios.sensitive_search import SensitiveSearchScenario
 from static.projectUtil import list_directories
@@ -20,7 +20,7 @@ def query_convert(codescan, block):
         return None
 
     ###########question2################
-    chat_json = codescan.create_chat(system_prompt="", output_format=Output.OutputStrListFormat)
+    chat_json = codescan.create_chat(system_prompt="", output_format=Output.StringList)
     result_json = chat_json.invoke({"input": "Which specific algorithm is it involve in?"})
     if result_json is None:
         return None

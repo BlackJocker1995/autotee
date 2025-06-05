@@ -4,7 +4,7 @@ from collections import defaultdict
 
 from loguru import logger
 
-from LLM.LLModel import OpenAIModel
+from LLM.llmodel import OpenAIModel
 from static.projectUtil import list_directories
 
 if __name__ == '__main__':

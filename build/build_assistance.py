@@ -5,9 +5,17 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 from loguru import logger
-from .conversion_examples import JAVA_CONVERSION_EXAMPLES, PYTHON_CONVERSION_EXAMPLES
+import pexpect
 
-from LLM.LLModel import LLMConfig, LLModel
+from build.convert_tools import create_convert_tools
+from .conversion_examples import JAVA_CONVERSION_EXAMPLES, PYTHON_CONVERSION_EXAMPLES
+from langchain_community.agent_toolkits import FileManagementToolkit
+from langchain_core.tools import BaseTool
+from langchain.tools import tool
+import re
+import os
+
+from LLM.llmodel import LLMConfig, LLModel
 from LLM.output import Output
 # from LLM.react import ReActModel
 from LLM.scenarios.code_convert_test_build import CodeConvertBuildTestScenario
@@ -16,21 +24,24 @@ from static.code_match import PythonCode
 from static.get_env import return_env
 from static.projectUtil import list_directories, copy_directory
 
-@dataclass
-class ConversionConfig:
-    """Configuration for code conversion process"""
-    source_language: str
-    target_language: str = "rust"
-    examples: List[str] = field(default_factory=list)
-    agent_model: Optional[str] = None
 
 class TestAssistance:
     """Base class for language-specific test assistance"""
-    
-    def __init__(self, config: ConversionConfig):
-        self.config = config
-        self.code_dynamic = CodeDynamic.class_generator(config.source_language)
-    
+
+    def __init__(self, source_language: str, examples: Optional[list] = None, agent_model: Optional[str] = None):
+        self.source_language = source_language
+        self.examples = examples or []
+        self.agent_model = agent_model
+        self.code_dynamic = CodeDynamic.class_generator(source_language)
+        # 默认配置
+        self.exec = "py" if source_language == "python" else "java"
+        self.test_file_name = "test" if source_language == "python" else "Test"
+        if not self.examples:
+            if source_language == "python":
+                self.examples = PYTHON_CONVERSION_EXAMPLES
+            elif source_language == "java":
+                self.examples = JAVA_CONVERSION_EXAMPLES
+
     def set_project_path(self, project_path: str):
         self.code_dynamic.config.project_path = project_path
 
@@ -39,10 +50,8 @@ class TestAssistance:
 
     def list_source_project(self, project_path):
         code_file_path = os.path.join(project_path, "code_file")
-
-        # List all directories within the specified path
         dirs = list_directories(code_file_path)
-        return [it for it in dirs if f"_{self.config.source_language}" in it]
+        return [it for it in dirs if f"_{self.source_language}" in it]
 
     def _add_test_cases(self, agent: LLModel, 
                        project_path: Path,
@@ -167,18 +176,20 @@ class TestAssistance:
         """
 
         # short name
-        name = LLModel.get_short_name(agent_model)
+        llm_config = LLMConfig(provider="openai", model=agent_model)
+        llm = LLModel.from_config(llm_config)
+        name = llm.get_short_name(agent_model)
         source_path = os.path.join(f"/home/rdhan/tmp/{name}/tee")
 
         code_file_path = os.path.join(project_path, "code_file")
 
         # List all directories within the specified path
         dirs = list_directories(code_file_path)
-        dirs = [it for it in dirs if it.endswith(f"_{self.config.source_language}")]
+        dirs = [it for it in dirs if it.endswith(f"_{self.source_language}")]
         for dir_item in dirs:
             logger.info(f"Switch to {dir_item}.")
             # Skip directories that do not contain "_" in their name
-            if not f"_{self.config.source_language}" in dir_item:
+            if not f"_{self.source_language}" in dir_item:
                 continue
 
             # Extract a hash index from the directory name for naming Rust files
@@ -188,14 +199,14 @@ class TestAssistance:
             rust_path_dir = os.path.join(code_file_path, f"{hash_index}_rust_{name}")
             failed_path_dir = os.path.join(code_file_path, f"{hash_index}_rust_{name}_failed")
 
-            if not overwrite and (os.path.exists(rust_path_dir) or os.path.exists(failed_path_dir)):
-                logger.info(f"Skip this {rust_path_dir}")
-                continue
+            # if not overwrite and (os.path.exists(rust_path_dir) or os.path.exists(failed_path_dir)):
+            #     logger.info(f"Skip this {rust_path_dir}")
+            #     continue
 
-            # Check if the main Java file exists; if not, log a warning and skip
-            if not os.path.exists(test_file):
-                logger.warning(f"Main {self.config.source_language} file does not exist, finish previous step first!")
-                continue
+            # # Check if the main Java file exists; if not, log a warning and skip
+            # if not os.path.exists(test_file):
+            #     logger.warning(f"Main {self.source_language} file does not exist, finish previous step first!")
+            #     continue
 
             # Open and read the Java main file
             with open(test_file, "r", encoding="utf-8") as f:
@@ -287,85 +298,72 @@ class TestAssistance:
 
     def _react_convert_build_test(self, code, path_dir, agent_model) -> int:
         """
-        Convert, build, and test the given code using a ReAct model.
+        Convert, build, and test the given code using a langchain agent.
 
         :param code: The source code to be converted
         :param path_dir: The directory path of the source code
         :param agent_model: The agent model to be used
         :return: An integer indicating the success (-1) or failure (other values) of the process
         """
-        # Get the path for the Rust project
         rust_project_path = self._get_rust_project_path(agent_model)
+        agent = self._create_react_model(path_dir, rust_project_path, agent_model)  # returns CompiledGraph
+
+
+        self._setup_rust_project(rust_project_path)
         
-        # Create a ReAct model instance
-        model = self._create_react_model(path_dir, rust_project_path, agent_model)
-        
-        # Analyze the source code and add conversion examples
-        if not self._analyze_code(model, code):
-            return -1
-        
-        # Convert the source code to Rust
-        rust_code, rust_dependency = self._convert_code_to_rust(model, code)
-        if rust_code is None:
-            return -1
-        
-        # Set up the Rust project with the converted code
-        self._setup_rust_project(rust_project_path, rust_code)
-        
-        # Verify if the Rust code builds successfully
-        return self._verify_build_success(model, rust_code)
+        example_prompt = CodeConvertBuildTestScenario.prompt_convert_example(self.source_language, self.examples)
+        convert_prompt = (
+            f"Here is a conversion example:\n{example_prompt}\n"
+            f"Please refer to the above example and convert the following code to Rust, keeping the input and output types the same. {code}\n"
+            f"Note: If the code involves random methods, consistency can be considered sufficient as long as the format is the same."
+        )
+        convert_result = agent.invoke({"input": convert_prompt})
+    
+        if convert_result is None:
+            return False
+        return True
 
     def _get_rust_project_path(self, agent_model) -> str:
         """Get the path for the Rust project"""
         return os.path.join(return_env()["tee_build_path"],
                           LLModel.get_short_name(agent_model))
 
-    def _create_react_model(self, path_dir, rust_project_path, agent_model):
-        """Create and return a langchain agent (CompiledGraph) instance"""
-        # 构造 LLM
-        llm_config = LLMConfig(provider="openai", model=agent_model)  # 可根据实际provider调整
+    def _create_react_model(self, path_dir, rust_project_path, agent_model, test_number=1):
+        """
+        Create and return a langchain agent (CompiledGraph) instance with project/file management and build tools.
+        """
+        
+        llm_config = LLMConfig(provider="openai", model=agent_model)
         llm = LLModel.from_config(llm_config)
-        # 构造 actions/tools
-        action_object = CodeConvertBuildTestScenario.Actions(
-            language=self.config.source_language,
-            source_project_path=path_dir,
-            rust_project_path=rust_project_path,
-            project_path=rust_project_path,
-            project_name="tee"
-        )
-        methods_name, _ = CodeConvertBuildTestScenario.get_class_method_info()
-        tools = [getattr(action_object, name) for name in methods_name]
+
+        tools = create_convert_tools(path_dir, rust_project_path, language=self.source_language)
+
         agent = llm.create_agent(tools)
         return agent
 
-    def _analyze_code(self, model, code) -> bool:
-        """Analyze the source code and add conversion examples"""
-        qus_result = model.agent.query(CodeConvertBuildTestScenario.prompt_code_analysis(code))
+    def _analyze_code(self, agent, code) -> bool:
+        """Analyze the source code only"""
+        qus_result = agent.invoke({"input": CodeConvertBuildTestScenario.prompt_code_analysis(code)})
         logger.info(qus_result)
-        
-        model.agent.add_message(
-            "user", 
-            CodeConvertBuildTestScenario.prompt_convert_example(
-                self.config.source_language,
-                self.config.examples
-            )
-        )
         return True
 
-    def _convert_code_to_rust(self, model, code):
-        """Convert the source code to Rust"""
-        qus_result = model.agent.query_json(
-            message=f" Implement this code using Rust with same type input and return. {code}."
-                    f"Please note that if it pertains to random methods, consistency can be deemed adequate as long as the format is the same. ",
-            output_format=Output.RustCodeWithDepend, 
-            remember=True
+    def _convert_code_to_rust(self, agent, code):
+        """Convert the source code to Rust, including example prompt"""
+        example_prompt = CodeConvertBuildTestScenario.prompt_convert_example(
+            self.config.source_language,
+            self.config.examples
         )
-
+        example_prompt_with_note = f"Here is a conversion example:\n{example_prompt}\n"
+        prompt = (
+            f"{example_prompt_with_note}"
+            f"Please refer to the above example and convert the following code to Rust, keeping the input and output types the same. {code}\n"
+            f"Note: If the code involves random methods, consistency can be considered sufficient as long as the format is the same."
+        )
+        qus_result = agent.invoke({"input": prompt})
         if qus_result is None:
             return None, None
-
-        model.agent.messages_memory.pop(2)
-        return qus_result.code, qus_result.dependencies
+        # 假设 qus_result 有 code, dependencies 属性
+        return getattr(qus_result, "code", None), getattr(qus_result, "dependencies", None)
 
     def _setup_rust_project(self, rust_project_path, rust_code):
         """Set up the Rust project with the converted code"""
@@ -380,16 +378,18 @@ class TestAssistance:
         rust_target.clear_dependencies()
         rust_target.write_file_code("main.rs", rust_code)
 
-    def _verify_build_success(self, model, rust_code) -> int:
-        """Verify if the Rust code builds successfully"""
-        qus_result = model.infer_react(
-            question=CodeConvertBuildTestScenario.prompt_convert_and_build_prompt(rust_code)
-        )
-        
-        if qus_result != -1:
+    def _verify_build_success(self, agent, rust_code) -> int:
+        """Verify if the Rust code builds successfully using agent.invoke"""
+        prompt = CodeConvertBuildTestScenario.prompt_convert_and_build_prompt(rust_code)
+        result = agent.invoke({"input": prompt})
+        # 假设 result 为 int 或有相关属性
+        if hasattr(result, "success") and result.success:
             logger.info("Success")
-            return qus_result
-            
+            return 1
+        if isinstance(result, int) and result != -1:
+            logger.info("Success")
+            return result
+        logger.warning("Build verification failed.")
         return -1
 
     def _rust_test_add(self, codescan: Type[LLModel], rust_code: str, code: str = "") -> str:
@@ -406,7 +406,7 @@ class TestAssistance:
             codescan.add_message('user', message)
 
         main_code = codescan.query_json(message=f"Code: ```{rust_code}```",
-                                        output_format=Output.OutputCodeFormat)
+                                        output_format=Output.Code)
         main_code = main_code.code
 
         return main_code
@@ -485,37 +485,10 @@ class TestAssistance:
     def class_generator(language) -> 'TestAssistance':
         """
         Generate and return an instance of the appropriate TestAssistance subclass based on the given language.
-
-        :param language: A string representing the programming language (e.g., 'java' or 'python')
-        :return: An instance of the corresponding TestAssistance subclass
         """
-        # Dictionary mapping language strings to their respective TestAssistance subclasses 
-        class_dict = {
-            "java": JavaTestAssistance,
-            "python": PythonTestAssistance
-        }
-        # Return an instance of the appropriate subclass, initialized with the language
-        return class_dict[language](ConversionConfig(language))
-
-class JavaTestAssistance(TestAssistance):
-
-    def __init__(self, config: ConversionConfig):
-        super().__init__(config)
-        self._init_java_config()
-        
-    def _init_java_config(self):
-        """Initialize Java-specific configuration"""
-        self.exec = "java"
-        self.test_file_name = "Test"
-        self.config.examples = JAVA_CONVERSION_EXAMPLES
-
-class PythonTestAssistance(TestAssistance):
-    def __init__(self, config: ConversionConfig):
-        super().__init__(config)
-        self._init_python_config()
-        
-    def _init_python_config(self):
-        """Initialize Python-specific configuration"""
-        self.exec = "py"
-        self.test_file_name = "test"
-        self.config.examples = PYTHON_CONVERSION_EXAMPLES
+        if language == "java":
+            return TestAssistance("java", JAVA_CONVERSION_EXAMPLES)
+        elif language == "python":
+            return TestAssistance("python", PYTHON_CONVERSION_EXAMPLES)
+        else:
+            return TestAssistance(language)

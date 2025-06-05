@@ -3,7 +3,7 @@ import os
 
 from loguru import logger
 
-from LLM.LLModel import LLMConfig, LLModel
+from LLM.llmodel import LLMConfig, LLModel
 from LLM.scenarios.sensitive_search import SensitiveSearchScenario
 from static.projectUtil import list_directories
 
