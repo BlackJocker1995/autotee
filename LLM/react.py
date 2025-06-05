@@ -3,7 +3,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from LLM.action import Scenario
-from LLM.llmodel import LModel
+from LLM.llmodel import LLMConfig, LLModel
 from LLM.output import Output
 from a4test.test_assistance import timing_decorator
 from static.projectUtil import truncate_string

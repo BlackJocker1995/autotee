@@ -3,40 +3,39 @@ import os
 
 from loguru import logger
 
-from LLM.llmodel import OpenAIModel
+from LLM.llmodel import LLMConfig, LLModel
 from LLM.scenarios.sensitive_search import SensitiveSearchScenario
 from static.projectUtil import list_directories
 
 
 def query_convert(codescan, block):
-    # check first line (only in dataset generation)
-    # ask what llm can find
-    result = codescan.query(SensitiveSearchScenario.get_question1() + f"``` {block} ```")
+    # 新接口：每次新建 chat runnable
+    chat = codescan.create_chat(system_prompt="", output_format=None)
+    result = chat.invoke({"input": SensitiveSearchScenario.get_question1() + f"``` {block} ```"})
 
     ###########question1################
     if "Yes" not in result:
-        codescan.re_init_chat()
+        # 新接口无需 re_init_chat，直接 return
         return None
 
     ###########question2################
-    result_json = codescan.query_json(SensitiveSearchScenario.get_question3(),
-                                      SensitiveSearchScenario.Que3)
+    chat_json = codescan.create_chat(system_prompt="", output_format=SensitiveSearchScenario.Que3)
+    result_json = chat_json.invoke({"input": SensitiveSearchScenario.get_question3()})
     if result_json is None:
         return None
-    if result_json.result == ['']:
+    if getattr(result_json, "result", ['']) == ['']:
         return None
     # is a list[str]
     type_list = result_json.result
-    # logger.debug(f"{block} ---- {type_list}")
 
     sensitive_dict = dict()
-
     sensitive_dict.update({"type_list": type_list})
     return sensitive_dict
 
 if __name__ == '__main__':
     # codescan = OllamaModel("qwen2.5-coder:14b")
-    codescan = OpenAIModel("gpt-4o")
+    config = LLMConfig(provider="openai", model="gpt-4o")
+    codescan = LLModel.from_config(config)
 
     if "qwen2.5" in codescan.client_model:
         name = "qwen2.5"

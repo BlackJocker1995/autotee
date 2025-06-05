@@ -4,7 +4,29 @@ from typing import Optional, Dict
 from pydantic import Field
 
 from LLM.action import Scenario
-from static.code_match import determine_language_by_extension
+# from static.code_match import determine_language_by_extension
+def determine_language_by_extension(file_path: str):
+    """
+    根据文件扩展名判断编程语言类型。
+    支持: Python, Java, JavaScript, C++, C, Go, Rust, 其他。
+    """
+    ext = file_path.lower().split('.')[-1]
+    if ext == "py":
+        return "python"
+    elif ext == "java":
+        return "java"
+    elif ext in ("js", "jsx"):
+        return "javascript"
+    elif ext in ("cpp", "cc", "cxx", "hpp", "h"):
+        return "cpp"
+    elif ext == "c":
+        return "c"
+    elif ext == "go":
+        return "go"
+    elif ext == "rs":
+        return "rust"
+    else:
+        return "unknown"
 
 
 class SensitiveSearchScenario(Scenario):

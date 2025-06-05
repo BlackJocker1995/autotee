@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from loguru import logger
 from .conversion_examples import JAVA_CONVERSION_EXAMPLES, PYTHON_CONVERSION_EXAMPLES
 
-from LLM.llmodel import LModel, OpenAIModel
+from LLM.llmodel import LLMConfig, LLModel
 from LLM.output import Output
 from LLM.react import ReActModel
 from LLM.scenarios.code_convert_test_build import CodeConvertBuildTestScenario

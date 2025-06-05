@@ -1,487 +1,189 @@
-from typing import Type, Optional, Dict, List
-from abc import ABC, abstractmethod
-import os
-from pathlib import Path
-import instructor
-import ollama
-from openai import OpenAI
-from pydantic import BaseModel
-from pydantic_settings import BaseSettings
 from loguru import logger
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
+from typing import Any, Dict, Optional, List, Union, Type
+from langchain.tools import Tool, StructuredTool
+import os
 
-from LLM.output import Output
-from dotenv import load_dotenv
+import vllm
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
+from langchain_deepseek import ChatDeepSeek
+from langgraph.prebuilt import create_react_agent
+from langchain.chains import ConversationChain
+from langgraph.graph.graph import CompiledGraph
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from pydantic import SecretStr
+from langchain_core.prompts import PromptTemplate
+from abc import ABC, abstractmethod
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import HumanMessagePromptTemplate
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_community.chat_models.tongyi import ChatTongyi
+from langchain_community.llms import VLLM
+from langchain_community.llms import VLLMOpenAI
+from langchain_ollama import ChatOllama
+
 
 class LLMConfig(BaseSettings):
     """Configuration for LLM models. Only contains non-sensitive settings."""
-    ollama_host: str = "http://localhost:11434"
-    timeout: int = 300
-    max_retries: int = 3
-    
-    class Config:
-        token_file = ".token"
-        extra = "ignore"  # Ignore extra fields
+    provider: str = "openai"  # Supported: "openai", "qwen", "deepseek", "google"
+    model: str = ""
+    base_url: str = ""
+    token_file: str = "tokenfile"
+    request_timeout: int = 300
+    max_tokens: int = 4096
+    max_retries: int = 4
+    system_prompt: str = ""
 
-def get_api_key(key_name: str) -> Optional[str]:
-    """Get API key from environment variables or .env file."""
-    
-    # Get the directory of the current file
-    current_dir = Path(__file__).parent
-    env_path = current_dir / '.env'
-    
-    # Load .env file if it exists
-    if env_path.exists():
-        load_dotenv(env_path)
-    
-    return os.getenv(key_name)
+    def get_description(self) -> str:
+        """
+        Returns a description of the LLM configuration.
+        Returns:
+            str: A description of the LLM configuration, suitable for use as a directory name.
+        """
+        # Replace characters potentially problematic in directory names (like '.') with underscores.
+        safe_model_name = self.model.replace('.', '_').replace('/', '_').replace(':', '-')
+        return f"{self.provider}_{safe_model_name}"
 
-class LModel(ABC):
-    """Base class for LLM implementations."""
-    
-    def __init__(self, model_name: str, config: Optional[LLMConfig] = None):
-        self.config = config or LLMConfig()
-        self.model_name = model_name
-        self.messages_memory: List[Dict[str, str]] = []
-        self._initialize_client()
+def read_token_from_file(token_file: str, provider: str) -> str:
+    """Reads the token from the specified file based on the provider."""
+    if provider == "ollama":
+        return ""
 
-    @abstractmethod
-    def _initialize_client(self) -> None:
-        """Initialize the model client."""
-        pass
+    try:
+        token_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), token_file)
+        with open(token_file_path, "r") as f:
+            lines = f.readlines()
 
-    @abstractmethod
-    def execute(self, messages: List[Dict[str, str]], 
-                schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
-        """Execute model inference."""
-        pass
+        for line in lines:
+            if line.startswith(provider.upper() + "="):
+                _, value = line.strip().split("=", 1)
+                value = value.strip().strip('"')  # Remove quotes if present
+                return value
 
-    def query(self, message: str, output_format: Optional[Type[BaseModel]] = None,
-              remember: bool = True) -> BaseModel:
-        """Process a query with optional output format validation."""
-        tmp_messages = self.messages_memory.copy()
-        tmp_messages.append({"role": "user", "content": message})
+        logger.error(f"Token not found for provider: {provider}")
+        raise ValueError(f"Token not found for provider: {provider}")
+    except FileNotFoundError:
+        logger.error(f"Token file not found: {token_file}")
+        raise FileNotFoundError(f"Token file not found: {token_file}")
+    except Exception as e:
+        logger.error(f"Error reading token file: {e}")
+        raise RuntimeError(f"Error reading token file: {e}")
+
+
+class LLModel(ABC):
+    """
+    Abstract base class for LLM models.
+    """
+
+    _chat_model_map = {
+        "openai": ChatOpenAI,
+        "qwen": ChatTongyi,  # Assuming Qwen is compatible with OpenAI's interface
+        "deepseek": ChatDeepSeek,
+        "google": ChatGoogleGenerativeAI,
+        'vllm': VLLMOpenAI,
+        'ollama': ChatOllama
+    }
+    # Provider-specific configuration adjustments
+    _provider_base_urls = {
+        "ollama": "http://localhost:11434",
+        "vllm": "http://localhost:8000/v1"
+    }
+    def __init__(self, config: "LLMConfig"):
+        """
+        Initializes the LLM model based on the provided configuration.
+
+        Args:
+            config (LLMConfig): Configuration object for LLM model.
+        """
+        logger.info(f"LLModel init called with config: {config}")
+        self.config = config
+        self.provider = config.provider
+        self.system_prompt = config.system_prompt
+        api_key = read_token_from_file(config.token_file, config.provider)
+
+        # Adjust base URL based on provider
+        config.base_url = self._provider_base_urls.get(self.provider, "")
+        # Get the appropriate chat model class and initialize LLM
+        chat_model_class = self._chat_model_map.get(self.provider)
+        if not chat_model_class:
+            raise ValueError(f"Unsupported provider: {self.provider}")
         
-        result = self.execute(tmp_messages, output_format)
-        
-        if remember:
-            self.messages_memory.extend([
-                {"role": "user", "content": message},
-                {"role": "assistant", "content": result.model_dump_json()}
-            ])
-        
-        return result
+        self.llm = chat_model_class(
+            model=config.model,
+            request_timeout=config.request_timeout,
+            max_retries=config.max_retries,
+            max_tokens = config.max_tokens,
+            api_key=api_key,
+            base_url=config.base_url if config.base_url else None
+        )
+       
 
-    def add_message(self, role: str, content: str):
+    def get_description(self) -> str:
         """
-        Add a message to the messages list with a specified role and content.
-
-        This method appends a dictionary containing the role and content of a message
-        to the `messages` list. The role must be one of the predefined valid roles:
-        "user", "system", or "assistant". If an invalid role is provided, a
-        `ValueError` is raised.
-
-        :param role: The role associated with the message. Must be "user", "system", or "assistant".
-        :type role: str
-        :param content: The content of the message.
-        :type content: str
-
-        :raises ValueError: If the role is not one of "user", "system", or "assistant".
+        Returns a description of the LLM model.
+        Returns:
+            str: A description of the LLM model, suitable for use as a directory name.
         """
-        if not role in ["user", "system", "assistant"]:
-            raise ValueError(f"Invalid role: {role}")
-        self.messages_memory.append({"role": role, "content": content})
-
-
-    def query(self, message: str, output_format: Type[BaseModel] = None, remember=True) -> str:
-        """
-        Process a user message and obtain a response from the assistant.
-
-        This method appends the user's message to a temporary copy of the
-        message memory, executes a query to get a response, and optionally
-        remembers the interaction by updating the main message memory.
-
-        :param output_format:
-        :param message: The message from the user to be processed.
-        :type message: str
-        :param remember: A flag indicating whether to store the interaction
-                         in the message memory. Defaults to True.
-        :type remember: bool
-        :return: The response generated by the assistant.
-        :rtype: str
-        """
-        # Create a temporary copy of the message memory
-        tmp_messages_memory = self.messages_memory.copy()
-        # Add the user's message to the temporary memory
-        tmp_messages_memory.append({"role": "user", "content": message})
-        # Execute the query and get the result
-        result = self.execute(tmp_messages_memory, output_format).result
-
-        if remember:
-            # Remember the interaction by updating the main message memory
-            self.messages_memory.append({"role": "user", "content": message})
-            self.messages_memory.append({"role": "assistant", "content": result})
-
-        return result
-
-
-    def query_json(self, message: str, output_format: Type[BaseModel] = None, remember=True) -> BaseModel | None:
-        """
-        Process a user message and obtain a JSON-formatted response.
-
-        :param message: The input message from the user
-        :param output_format: The expected output format, should be a subclass of BaseModel
-        :param remember: Whether to remember this interaction, defaults to True
-        :return: A validated BaseModel instance, or None if validation fails
-        """
-        # Create a copy of the temporary message list
-        tmp_messages_memory = self.messages_memory.copy()
-        # Add the user message to the temporary list
-        tmp_messages_memory.append({"role": "user", "content": message})
-        # Insert the system prompt at the beginning of the list to guide AI in generating JSON output
-        tmp_messages_memory.insert(0, {"role": "system",
-                                       "content": self.get_json_prompt(output_format)})
-        # Execute the query and get the result
-        result = self.execute(tmp_messages_memory, output_format)
-
-        if remember:
-            # Remember the interaction by updating the main message memory
-            self.messages_memory.append({"role": "user", "content": message})
-            self.messages_memory.append({"role": "assistant", "content": result.model_dump_json()})
-        return result
-
-
-    def forget_last_query(self):
-        """
-        Forget the last user-assistant interaction by removing the last two messages.
-        """
-        self.messages_memory.pop()
-        self.messages_memory.pop()
-
-    def set_system_prompt(self, message):
-        """
-        Set a system prompt message.
-        :param message: The system prompt message to be added.
-        :type message: str
-        """
-        self.messages_memory.append({"role": "system", "content": message})
-
-    @staticmethod
-    def class_generator(model_name: str):
-        """
-        Generate a class instance based on the model name.
-        :param model_name: The name of the model.
-        :type model_name: str
-        :return: An instance of the corresponding model class.
-        :rtype: LModel
-        """
-        class_dict = {
-            "gpt": OpenAIModel,
-            "qwen": QwenModelLocal,
-            "llama": OllamaModel,
-            "deepseek": DeepseekModel,
-            "deepseek-r1": DeepseekModelLocal,
-        }
-        # Iterate over each key in the dictionary
-        for key in class_dict:
-            # Check if the current key is a substring of the model_client string
-            if key in model_name:
-                # If found, return the corresponding value from the dictionary
-                return class_dict[key](model_name)
-        raise ValueError(f"Unknown model name: {model_name}")
+        # Replace characters potentially problematic in directory names (like '.') with underscores.
+        safe_model_name = self.config.model.replace('.', '_').replace('/', '_').replace(':', '-')
+        return f"{self.provider}_{safe_model_name}"
 
     @classmethod
-    def get_short_name(cls,model_client:str) -> str:
+    def from_config(cls, config: "LLMConfig") -> "LLModel":
         """
-        Get the short name of the model client.
-        :param model_client: The name of the model client.
-        :type model_client: str
-        :return: The short name of the model client.
-        :rtype: str
+        Factory method to create an LLModel instance from a configuration.
+
+        Args:
+            config (LLMConfig): Configuration object for LLM model.
+
+        Returns:
+            LLModel: An instance of LLModel.
         """
-        # Define a dictionary mapping model names to their short forms
-        class_dict = {
-            "gpt": "gpt",
-            "qwen2.5": "qwen2.5",
-            "qwen": "qwen",
-            "llama": "llama",
-            "deepseek-chat": "deepseek",
-            "deepseek-r1": "deepseek-r1",
-        }
+        return cls(config)
 
-        # Iterate over each key in the dictionary
-        for key in class_dict:
-            # Check if the current key is a substring of the model_client string
-            if key in model_client:
-                # If found, return the corresponding value from the dictionary
-                return class_dict[key]
 
-        # If no keys are found in model_client, raise an exception
-        raise ValueError(f"Unknown model name: {model_client}")
-
-    def re_init_chat(self, system_messages:str=None):
+    def create_chat(self, system_prompt: str = "", output_format: Optional[Type[BaseModel]] = None):
         """
-        Re-initialize the chat with a given system message.
+        Creates a chat runnable with the LLM, incorporating a system prompt if provided.
 
-        This method clears the current list of messages and appends a new system
-        message. If no system message is provided, it defaults to using the first
-        message in the existing list if it has a role of "system".
+        Args:
+            system_prompt (Optional[str]): The system prompt to guide the conversation.
+            output_format (Optional[BaseModel]): The format for structured output, which can be a subclass of BaseModel.
 
-        :param system_messages: Optional; A dictionary representing the system
-                                message to initialize the chat with. If None,
-                                defaults to the first message in the list if it
-                                is a system message.
-        :type system_messages: dict or None
+        Returns:
+            A runnable chat object.
         """
-        # Check if the first message is a system message and assign it if not already set
-        if system_messages is None and self.messages_memory and self.messages_memory[0]["role"] == "system":
-            system_messages = self.messages_memory[0]
+        if self.llm is None:
+            raise ValueError("LLM model not initialized.")
+        if system_prompt:
+            self.system_prompt = system_prompt
+            
+        # Use the provided system prompt
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content=self.system_prompt),
+            ("human", "{input}")
+        ])
+     
+        if output_format:
+            out = prompt | self.llm.with_structured_output(output_format)
+        else:
+            out = prompt | self.llm
 
-        # Clear all messages
-        self.messages_memory.clear()
-
-        # Append the system message if it exists
-        if system_messages:
-            logger.info("Renew LLM system message.")
-            self.messages_memory.append(system_messages)
-
-    @staticmethod
-    def get_json_prompt(output_format: Type[BaseModel]) -> str:
-        """
-        Get the JSON prompt for the given output format.
-        :param output_format: The expected output format, should be a subclass of BaseModel.
-        :type output_format: Type[BaseModel]
-        :return: The JSON prompt string.
-        :rtype: str
-        """
-        return rf"""
-        You will get provided a JSON schema responses of a Pydantic model. 
-        Your task is to extract those in this JSON schema specified properties out of a given text,
-         and return a VALID JSON response adhering to the JSON schema.
-        Your Answer must not contain (```json**\n).
-        Here is the JSON schema: {output_format.model_json_schema()}.
-        You WILL return the instance of the JSON schema with the CORRECT extracted data, NOT the JSON schema itself. 
-        """.strip()
-
-    @abstractmethod
-    def close(self):
-        """
-        Close the client connection.
-        """
-        raise AttributeError('Sub class does not implement this function.')
-
-    @abstractmethod
-    def execute(self, messages:list, schema_model: Type[BaseModel] = None) -> BaseModel:
-        """
-        Execute the query with the given messages and schema model.
-        :param messages: The list of messages to be processed.
-        :type messages: list
-        :param schema_model: The expected output format, should be a subclass of BaseModel.
-        :type schema_model: Type[BaseModel]
-        :return: The response from the assistant.
-        :rtype: BaseModel
-        """
-        raise AttributeError('Sub class does not implement this function.')
-
-
-class OpenAIModel(LModel):
-    """OpenAI API implementation."""
+        return out
     
-    def _initialize_client(self) -> None:
-        api_key = get_api_key("OPENAI")
-        if not api_key:
-            raise ValueError("OpenAI API key not found in environment variables")
-        self.client = OpenAI(api_key=api_key)
     
-    def execute(self, messages: List[Dict[str, str]], 
-                schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
-        for attempt in range(self.config.max_retries):
-            try:
-                completion = self.client.beta.chat.completions.parse(
-                    model=self.model_name,
-                    messages=messages,
-                    response_format=schema_model or Output.StructureAnswer,
-                    timeout=self.config.timeout
-                )
-                return (schema_model or Output.StructureAnswer).model_validate_json(
-                    completion.choices[0].message.content
-                )
-            except Exception as e:
-                if attempt == self.config.max_retries - 1:
-                    raise e
-                logger.warning(f"Attempt {attempt + 1} failed: {e}")
-
-    def close(self):
-        self.client.close()
-        logger.info("Connection closed")
-
-
-class OllamaModel(LModel):
-    """Ollama API implementation."""
-    
-    def _initialize_client(self) -> None:
-        try:
-            self.client = ollama.Client(host=self.config.ollama_host)
-        except Exception as e:
-            logger.warning(f"init ollama failed: {e}")
-            raise ValueError("init ollama failed")
-    
-    def execute(self, messages: List[Dict[str, str]], 
-                schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
-        for attempt in range(self.config.max_retries):
-            try:
-                completion = self.client.chat(
-                    model=self.model_name,
-                    messages=messages,
-                    options={"num_ctx": 5120, "timeout": self.config.timeout},
-                    format=(schema_model or Output.StructureAnswer).model_json_schema(),
-                )
-                return (schema_model or Output.StructureAnswer).model_validate_json(
-                    completion['message']['content']
-                )
-            except Exception as e:
-                if attempt == self.config.max_retries - 1:
-                    raise e
-                logger.warning(f"Attempt {attempt + 1} failed: {e}")
-
-    def close(self):
+    def create_agent(self, tools: list) -> CompiledGraph:
         """
-        Clean up the Ollama client connection.
-        Attempts to gracefully close the connection and provides CLI instructions
-        if the programmatic close fails.
+        Creates an agent using the LLM and provided tools.
+
+        Args:
+            tools (list): A list of tools to be used by the agent.
+
+        Returns:
+            CompiledGraph: The compiled graph representing the agent.
         """
-        try:
-            # Attempt to clean up the client instance
-            if hasattr(self.client, '_session'):
-                self.client._session.close()
-            self.client = None
-            logger.info("Ollama client connection closed.")
-        except Exception as e:
-            logger.warning(f"Failed to close Ollama client programmatically: {e}")
-            logger.info("To completely stop Ollama, run in terminal:")
-            logger.info("  ollama serve --stop")
-
-class QwenModelLocal(LModel):
-    """Qwen API implementation."""
-    
-    def _initialize_client(self) -> None:
-        try:
-            self.client = ollama.Client(host=self.config.ollama_host)
-        except Exception as e:
-            logger.warning(f"init qwen failed: {e}")
-            raise ValueError("init qwen failed")
-    
-    def execute(self, messages: List[Dict[str, str]], 
-                schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
-        for attempt in range(self.config.max_retries):
-            try:
-                completion = self.client.chat(
-                    model=self.model_name,
-                    messages=messages,
-                    options={"num_ctx": 5120, "timeout": self.config.timeout},
-                    format=(schema_model or Output.StructureAnswer).model_json_schema(),
-                )
-                return (schema_model or Output.StructureAnswer).model_validate_json(
-                    completion['message']['content']
-                )
-            except Exception as e:
-                if attempt == self.config.max_retries - 1:
-                    raise e
-                logger.warning(f"Attempt {attempt + 1} failed: {e}")
-
-    def close(self):
-        """
-        Clean up the Qwen client connection.
-        Attempts to gracefully close the connection and provides CLI instructions
-        if the programmatic close fails.
-        """
-        try:
-            # Attempt to clean up the client instance
-            if hasattr(self.client, '_session'):
-                self.client._session.close()
-            self.client = None
-            logger.info("Qwen client connection closed.")
-        except Exception as e:
-            logger.warning(f"Failed to close Qwen client programmatically: {e}")
-            logger.info("To completely stop Qwen, run in terminal:")
-            logger.info("  ollama serve --stop")
-
-
-class DeepseekModelLocal(LModel):
-    """Qwen API implementation."""
-    
-    def _initialize_client(self) -> None:
-        try:
-            self.client = ollama.Client(host=self.config.ollama_host)
-        except Exception as e:
-            logger.warning(f"init qwen failed: {e}")
-            raise ValueError("init qwen failed")
-    
-    def execute(self, messages: List[Dict[str, str]], 
-                schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
-        for attempt in range(self.config.max_retries):
-            try:
-                completion = self.client.chat(
-                    model=self.model_name,
-                    messages=messages,
-                    options={"num_ctx": 5120, "timeout": self.config.timeout},
-                    format=(schema_model or Output.StructureAnswer).model_json_schema(),
-                )
-                return (schema_model or Output.StructureAnswer).model_validate_json(
-                    completion['message']['content']
-                )
-            except Exception as e:
-                if attempt == self.config.max_retries - 1:
-                    raise e
-                logger.warning(f"Attempt {attempt + 1} failed: {e}")
-
-    def close(self):
-        """
-        Clean up the Qwen client connection.
-        Attempts to gracefully close the connection and provides CLI instructions
-        if the programmatic close fails.
-        """
-        try:
-            # Attempt to clean up the client instance
-            if hasattr(self.client, '_session'):
-                self.client._session.close()
-            self.client = None
-            logger.info("Qwen client connection closed.")
-        except Exception as e:
-            logger.warning(f"Failed to close Qwen client programmatically: {e}")
-            logger.info("To completely stop Qwen, run in terminal:")
-            logger.info("  ollama serve --stop")
-
-
-class DeepseekModel(LModel):
-    """Deepseek API implementation."""
-    
-    def _initialize_client(self) -> None:
-        api_key = get_api_key("DEEPSEEK")
-        if not api_key:
-            raise ValueError("Deepseek API key not found in environment variables")
-        try:
-            self.client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-        except Exception as e:
-            logger.warning(f"init deepseek failed: {e}")
-            raise ValueError("init deepseek failed")
-    
-    def execute(self, messages: List[Dict[str, str]], 
-                schema_model: Optional[Type[BaseModel]] = None) -> BaseModel:
-        for attempt in range(self.config.max_retries):
-            try:
-                tmp_agent = instructor.from_openai(self.client, mode=instructor.Mode.JSON)
-                completion = tmp_agent.chat.completions.create(
-                    model=self.model_name,
-                    messages=messages,
-                    response_model=schema_model or Output.StructureAnswer,
-                    timeout=self.config.timeout
-                )
-                return completion
-            except Exception as e:
-                if attempt == self.config.max_retries - 1:
-                    raise e
-                logger.warning(f"Attempt {attempt + 1} failed: {e}")
-
-    def close(self):
-        self.client.close()
-        logger.info("Connection closed")
+        if self.llm is None:
+            raise ValueError("LLM model not initialized.")
+        return create_react_agent(self.llm, tools=tools)

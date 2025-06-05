@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 import pexpect
 from loguru import logger
 
-from LLM.llmodel import LModel, OpenAIModel
+from LLM.llmodel import LLMConfig, LLModel
 from LLM.output import Output
 from LLM.scenarios.generate_test_case import GenerateMulTestCaseScenario, GenerateOneTestCaseScenario
 from static.get_env import return_env
@@ -184,12 +184,12 @@ class CodeDynamic:
         else:
             print(f"The file {file} does not exist and cannot be deleted.")
 
-    def design_test_cases(self, agent:LModel, code: str, multiple: bool = False) -> str:
+    def design_test_cases(self, agent: "LLModel", code: str, multiple: bool = False) -> str:
         """Generate one or multiple test cases using an LLM agent.
         
         :param agent: Language model agent to generate test cases
-        :type agent: LModel
-        :param code: Code to generate test cases for 
+        :type agent: LLModel
+        :param code: Code to generate test cases for
         :type code: str
         :param multiple: Whether to generate multiple test cases, defaults to False
         :type multiple: bool
@@ -199,24 +199,23 @@ class CodeDynamic:
         # Choose scenario based on multiple flag
         if multiple:
             scenario = GenerateMulTestCaseScenario.class_generator(self.config.language, "mul_case")
-            system_prompt = scenario.mul_case_system_prompt(self.config.language) 
+            system_prompt = scenario.mul_case_system_prompt(self.config.language)
         else:
             scenario = GenerateOneTestCaseScenario.class_generator(self.config.language, "one_case")
             system_prompt = scenario.one_case_system_prompt(self.config.language)
             
-        # Add system prompt and query model
-        agent.add_message("system", system_prompt)
-        out_code = agent.query_json(message=scenario.query_prompt(code),
-                                  output_format=Output.OutputCodeFormat)
+        # 新接口：用 create_chat 生成 chat runnable
+        chat = agent.create_chat(system_prompt=system_prompt, output_format=Output.OutputCodeFormat)
+        out_code = chat.invoke({"input": scenario.query_prompt(code)})
         
         # Return appropriate format based on multiple flag
-        return out_code.code
+        return out_code.code if hasattr(out_code, "code") else out_code
 
-    def build_test_case(self, agent: LModel, max_rounds=2):
+    def build_test_case(self, agent: "LLModel", max_rounds=2):
         """Build and test a test case using an LLM agent.
 
         :param agent: Language model agent to use for test case generation
-        :type agent: LModel
+        :type agent: LLModel
         :param max_rounds: Maximum number of build attempts, defaults to 2
         :type max_rounds: int
         :returns: None if build succeeds within max_rounds

@@ -4,7 +4,7 @@ import re
 from loguru import logger
 from tqdm import tqdm
 
-from LLM.llmodel import LModel, OllamaModel
+from LLM.llmodel import LLMConfig, LLModel
 from LLM.output import Output
 from LLM.scenarios.sensitive_search import SensitiveSearchScenario
 from static.projectUtil import read_code_block, list_directories
@@ -16,7 +16,7 @@ def extract_content_fun(text):
     return matches
 
 
-def query_sensitive(agent: LModel, dir_item: str, in_name: str, out_name: str) -> None:
+def query_sensitive(agent: LLModel, dir_item: str, in_name: str, out_name: str) -> None:
     codes = read_code_block(dir_item, in_name)
     out = []
 
@@ -33,14 +33,14 @@ def query_sensitive(agent: LModel, dir_item: str, in_name: str, out_name: str) -
         #             'verif', 'sign']):
         #     continue
         
-        agent.re_init_chat()
-
-        # Ask what LLM can find
-        if "Yes" not in agent.query(SensitiveSearchScenario.get_question1() + f"``` {block} ```"):
+        # 新接口：每次新建 chat runnable
+        chat = agent.create_chat(system_prompt="", output_format=None)
+        if "Yes" not in chat.invoke({"input": SensitiveSearchScenario.get_question1() + f"``` {block} ```"}):
             continue
 
-        result_json = agent.query_json(SensitiveSearchScenario.get_question3(), Output.StructureAnswer)
-        if not result_json or result_json.result == ['']:
+        chat_json = agent.create_chat(system_prompt="", output_format=Output.StructureAnswer)
+        result_json = chat_json.invoke({"input": SensitiveSearchScenario.get_question3()})
+        if not result_json or getattr(result_json, "result", ['']) == ['']:
             continue
 
         type_list = result_json.result
@@ -48,9 +48,9 @@ def query_sensitive(agent: LModel, dir_item: str, in_name: str, out_name: str) -
 
         sensitive_dict = {}
         for type_item in type_list:
-            result_json = agent.query_json(SensitiveSearchScenario.get_question4(type_item),
-                                           Output.OutputStrListFormat)
-            if result_json and result_json.result:
+            chat_type = agent.create_chat(system_prompt="", output_format=Output.OutputStrListFormat)
+            result_json = chat_type.invoke({"input": SensitiveSearchScenario.get_question4(type_item)})
+            if result_json and getattr(result_json, "result", None):
                 sensitive_dict[type_item] = result_json.result
 
         if sensitive_dict:
@@ -63,10 +63,11 @@ def query_sensitive(agent: LModel, dir_item: str, in_name: str, out_name: str) -
 
 if __name__ == '__main__':
     # codescan = OpenAIModel("gpt-4o")
-    agent = OllamaModel("qwen2.5-coder:32b")
-    overwrite = True
+    config = LLMConfig(provider="ollama", model="qwen2.5-coder:32b")
+    agent = LLModel.from_config(config)
+    overwrite = False
     in_name = f"java"
-    out_name = f"{agent.client_model}_sen"
+    out_name = f"{agent.get_description()}_sen"
 
     dirs = list_directories("/home/rdhan/data/dataset/java")
 
