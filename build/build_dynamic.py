@@ -27,77 +27,59 @@ class BuildConfig:
 
 
 class CodeDynamic:
-    """Base class for dynamic code building and testing across multiple languages.
-
-    This class provides core functionality for building, testing, and modifying code
-    projects in various programming languages. It serves as an abstract base class
-    that language-specific implementations (Java, Python, Rust) inherit from.
-
-    Attributes:
-        env (dict): Environment variables for the build process
-        languages (str): Target programming language
-        exec (str): File extension for executable files
-        test_file_name (str): Default name for test files
-        project_path (str): Path to the project directory
+    """
+    Abstract base class for dynamic multi-language build/test, unifying interfaces for batch processing and extension.
+    Subclasses must implement all abstract methods, maintaining consistent parameters and return values.
     """
 
     def __init__(self, config: BuildConfig):
-        """Initialize the CodeDynamic instance.
-
-        Args:
-            config (BuildConfig): Configuration for the build process
+        """
+        Initializes the builder, loading environment variables and configuration.
+        :param config: BuildConfig build configuration
         """
         self.config = config
-        self._init_environment()
+        self.env = self._init_environment()
 
-    def _init_environment(self) -> None:
-        """Initialize build environment"""
-        self.env = return_env()
-        self.env['PATH'] = os.getenv('WORKPATH') + self.env.get('PATH', '')
+    def _init_environment(self) -> dict:
+        """Initializes the build environment variables, returning an environment dictionary."""
+        env = return_env()
+        env['PATH'] = (os.getenv('WORKPATH') or '') + env.get('PATH', '')
+        return env
 
     @abstractmethod
-    def build_target(self, target_file: str):
-        """Build the specified target file.
-
-        :param target_file: Path to the target file to build
-        :type target_file: str
-        :returns: Build output or success message
-        :rtype: str
+    def build_target(self, target_file: str) -> str:
+        """
+        Builds the specified target file.
+        :param target_file: Target filename
+        :return: Build output or success message
         """
         pass
 
     @abstractmethod
-    def modify_judgment(self, result) -> bool:
-        """Determine if build output requires modifications.
-
-        :param result: Build output to analyze
-        :type result: str
-        :returns: True if modifications are needed, False otherwise
-        :rtype: bool
+    def modify_judgment(self, build_output: str) -> bool:
+        """
+        Determines if the build output requires modification.
+        :param build_output: Build output content
+        :return: True if modification is needed, False otherwise
         """
         pass
 
     @abstractmethod
     def compile_project(self, path_dir: str, file_name: str) -> str:
-        """Compile the project at the specified path.
-
-        :param path_dir: Directory containing project files
-        :type path_dir: str
-        :param file_name: Main file to compile
-        :type file_name: str
-        :returns: Compilation output or success message
-        :rtype: str
+        """
+        Compiles the project file in the specified directory.
+        :param path_dir: Project directory
+        :param file_name: Main filename
+        :return: Compilation output or success message
         """
         pass
 
     @abstractmethod
-    def is_build_target_exit(self, file_name: str) -> bool:
-        """Check if build target exists.
-
-        :param file_name: Name of file to check
-        :type file_name: str
-        :returns: True if target exists, False otherwise
-        :rtype: bool
+    def is_build_target_exist(self, file_name: str) -> bool:
+        """
+        Checks if the build target exists.
+        :param file_name: Filename
+        :return: True if it exists, False otherwise
         """
         pass
 
@@ -204,7 +186,7 @@ class CodeDynamic:
             scenario = GenerateOneTestCaseScenario.class_generator(self.config.language, "one_case")
             system_prompt = scenario.one_case_system_prompt(self.config.language)
             
-        # 新接口：用 create_chat 生成 chat runnable
+        # New interface: use create_chat to generate chat runnable
         chat = agent.create_chat(system_prompt=system_prompt, output_format=Output.OutputCodeFormat)
         out_code = chat.invoke({"input": scenario.query_prompt(code)})
         
@@ -260,6 +242,13 @@ class CodeDynamic:
             output = self.build_target(file_name)
             if output == "success":
                 logger.info("Build pass!")
+                # 在构建成功后运行覆盖率测试
+                if self.config.language in ["java", "python"]:
+                    coverage_result = self.run_coverage()
+                    if coverage_result != -1:
+                        logger.info(f"Coverage test passed with {coverage_result}% coverage.")
+                    else:
+                        logger.warning("Coverage test failed.")
                 return True
             else:
                 logger.info("Try build again.")
@@ -283,6 +272,9 @@ class CodeDynamic:
 
 
 class RustDynamic(CodeDynamic):
+    """
+    Rust language dynamic build implementation, inheriting CodeDynamic, with unified and clear responsibilities.
+    """
 
     def __init__(self, config: BuildConfig):
         super().__init__(config)
@@ -290,14 +282,37 @@ class RustDynamic(CodeDynamic):
         self.config.exec_extension = "rs"
         self.config.test_file_name = "test"
 
-    def modify_judgment(self, result) -> bool:
-        pass
+    def modify_judgment(self, build_output: str) -> bool:
+        """
+        Determines if the Rust build output needs modification.
+        :param build_output: Build output string
+        :return: True if modification is needed, False otherwise
+        """
+        # 示例实现，实际可根据错误关键字判断
+        if "error" in build_output.lower():
+            return True
+        return False
 
     def compile_project(self, path_dir: str, file_name: str) -> str:
-        pass
+        """
+        Compiles the Rust project by calling cargo build.
+        :param path_dir: Project directory
+        :param file_name: Target filename (can be ignored)
+        :return: Compilation output or success message
+        """
+        cmd = ["cargo", "build"]
+        output = self.run_cmd(cmd, exe_env=path_dir)
+        if "Finished" in output and "error" not in output.lower():
+            return "success"
+        return output
 
-    def is_build_target_exit(self, file_name) -> bool:
-        target = os.path.join(self.config.project_name, self.config.project_name, "src", file_name)
+    def is_build_target_exist(self, file_name: str) -> bool:
+        """
+        Checks if the Rust build target exists.
+        :param file_name: Filename
+        :return: True if it exists, False otherwise
+        """
+        target = os.path.join(self.config.project_path, self.config.project_name, "src", file_name)
         return os.path.exists(target)
 
     def clear_dependencies(self):
@@ -363,19 +378,19 @@ class RustDynamic(CodeDynamic):
     def read_file_code(self, file_name: str) -> str:
         """
          Reads the content of a specified file within the project directory.
-
-         This function opens a file located in the `src` directory of the project,
-         reads its content, and returns it as a string. The file is opened with
-         UTF-8 encoding to ensure proper handling of text data.
-
-         :param file_name:
-         :type file_name: str
-         :return: The content of the file.
-         :rtype: str
-
-         :raises FileNotFoundError: If the specified file does not exist.
-         :raises IOError: If an I/O error occurs during file access.
-         """
+ 
+          This function opens a file located in the `src` directory of the project,
+          reads its content, and returns it as a string. The file is opened with
+          UTF-8 encoding to ensure proper handling of text data.
+ 
+          :param file_name: Name of the file to read
+          :type file_name: str
+          :return: The content of the file.
+          :rtype: str
+ 
+          :raises FileNotFoundError: If the specified file does not exist.
+          :raises IOError: If an I/O error occurs during file access.
+          """
         with open(os.path.join(self.config.project_path, self.config.project_name, "src", f"{file_name}"), 'r',
                   encoding='utf-8') as f:
             code = f.read()
@@ -790,120 +805,166 @@ class JavaDynamic(CodeDynamic):
         except Exception as e:
             logger.info(f"Unexpected error: {e}")
             return -1
+    
+    def run_branch_coverage(self) -> float:
+        """Run JaCoCo coverage analysis on Java test file to measure branch coverage.
 
+        :returns: Branch coverage percentage as float, or -1 if analysis fails
+        :rtype: float
+        """
+        try:
+            # 1. Compile Java files
+            logger.info("Compiling Java files...")
+            if self.build_target("Test.java") != "success":
+                return -1
+
+            # 2. Run program with JaCoCo agent
+            logger.info("\nRunning with JaCoCo agent...")
+            jacoco_exec = "jacoco.exec"
+            subprocess.run([
+                'java',
+                f'-javaagent:{os.environ.get("JACOCO_AGENT")}=destfile={jacoco_exec}',
+                'Test'
+            ], check=True, env=self.env, cwd=self.config.project_path)
+
+            # 3. Generate report
+            logger.info("\nGenerating coverage report...")
+            report_dir = "coverage-report"
+            subprocess.run([
+                'java', '-jar', os.environ.get('JACOCO_CLI'),
+                'report', jacoco_exec,
+                '--classfiles', '.',
+                '--sourcefiles', '.',
+                '--html', report_dir,
+                '--xml', 'coverage.xml'
+            ], check=True, env=self.env, cwd=self.config.project_path)
+
+            # 4. Parse and display results
+            logger.info("\nBranch Coverage Results:")
+            logger.info("=" * 60)
+
+            tree = ET.parse(os.path.join(self.config.project_path, 'coverage.xml'))
+            root = tree.getroot()
+
+            # Find coverage data for Test class
+            test_class = root.find('.//class[@name="Test"]')
+            if test_class is not None:
+                counter = test_class.find('./counter[@type="BRANCH"]')
+                if counter is not None:
+                    missed = int(counter.get('missed', 0))
+                    covered = int(counter.get('covered', 0))
+                    total = missed + covered
+                    coverage = (covered / total) * 100 if total > 0 else 0
+
+                    logger.info(f"Coverage Summary for Test.java:")
+                    logger.info(f"Branch Coverage: {coverage:.2f}%")
+                    logger.info(f"Total Branches: {total}")
+                    logger.info(f"Covered Branches: {covered}")
+                    logger.info(f"Missed Branches: {missed}")
+
+                    logger.info(f"\nDetailed report available at: {report_dir}/index.html")
+                    return round(coverage, 2)
+                else:
+                    logger.info("No branch coverage data found")
+                    return -1
+            else:
+                logger.info("Test class not found in coverage data")
+                return -1
+
+        except subprocess.CalledProcessError as e:
+            logger.info(f"Error: {e}")
+            return -1
+        except Exception as e:
+            logger.info(f"Unexpected error: {e}")
+            return -1
 
 class PythonDynamic(CodeDynamic):
-    """Python-specific implementation of CodeDynamic for building and testing Python code."""
-
-    def modify_judgment(self, result) -> bool:
-        """Determine if Python build output requires modifications.
-
-        :param result: Build output to analyze
-        :type result: str
-        :returns: True if modifications are needed, False otherwise
-        :rtype: bool
-        """
-        pass
-
-    def compile_project(self, path_dir: str, file_name: str) -> str:
-        """Compile a Python project.
-
-        :param path_dir: Directory containing Python source files
-        :type path_dir: str
-        :param file_name: Main Python file to compile
-        :type file_name: str
-        :returns: Compilation output or success message
-        :rtype: str
-        :raises Exception: If compilation fails
-        """
-        pass
-
-    def is_build_target_exit(self, file_name) -> bool:
-        """Check if Python build target exists.
-
-        :param file_name: Name of the file to check
-        :type file_name: str
-        :returns: True if build target exists, False otherwise
-        :rtype: bool
-        """
-        target = os.path.join(self.config.project_path, "built")
-        return os.path.exists(target)
+    """
+    Python language dynamic build implementation, with unified and clear responsibilities.
+    """
 
     def __init__(self, config: BuildConfig):
-        """Initialize PythonDynamic instance.
-
-        :param config: Configuration for the build process
-        :type config: BuildConfig
-        """
         super().__init__(config)
         self.config.language = "python"
         self.config.exec_extension = "py"
         self.config.test_file_name = "test"
 
-    def build_target(self, target_name: str) -> str:
-        """Build a Python target file.
-
-        :param target_name: Name of the Python file to build
-        :type target_name: str
-        :returns: "success" if build succeeds, otherwise returns error output
-        :rtype: str
-        :raises Exception: If build fails
+    def modify_judgment(self, build_output: str) -> bool:
         """
-        env = CodeDynamic.env
-        python_path = env['PYTHON']
+        Determines if the Python build output needs modification.
+        :param build_output: Build output string
+        :return: True if modification is needed, False otherwise
+        """
+        if "traceback" in build_output.lower():
+            return True
+        return False
+
+    def compile_project(self, path_dir: str, file_name: str) -> str:
+        """
+        Python typically does not require compilation, returns success.
+        :param path_dir: Project directory
+        :param file_name: Filename
+        :return: success
+        """
+        return "success"
+
+    def is_build_target_exist(self, file_name: str) -> bool:
+        """
+        Checks if the Python build target exists (identified by a 'built' file).
+        :param file_name: Filename
+        :return: True if it exists, False otherwise
+        """
+        target = os.path.join(self.config.project_path, "built")
+        return os.path.exists(target)
+
+    def build_target(self, target_name: str) -> str:
+        """
+        Executes a Python file and checks for exceptions.
+        :param target_name: Python filename
+        :return: "success" if successful, otherwise returns error output
+        """
+        env = self.env.copy()
+        python_path = env.get('PYTHON', 'python')
         cmd = [python_path, target_name]
         output = self.run_cmd(cmd, exe_env=self.config.project_path)
-        if "Traceback" in output:
+        if "traceback" in output.lower():
             return output
         with open(os.path.join(self.config.project_path, "built"), 'w') as file:
             pass
         return "success"
 
     def execute(self, target_file: str = None) -> str:
-        """Execute a Python script.
-
-        :param target_file: Name of the Python file to execute, defaults to test file
-        :type target_file: str
-        :returns: Standard output from script execution
-        :rtype: str
-        :raises FileNotFoundError: If script cannot be found
-        :raises subprocess.SubprocessError: If execution fails
+        """
+        Executes a Python script.
+        :param target_file: Python filename, defaults to test file
+        :return: Standard output from the script
         """
         if not target_file:
             target_file = f"{self.config.test_file_name}.py"
-        env = CodeDynamic.env
-        python_path = env['PYTHON']
+        env = self.env.copy()
+        python_path = env.get('PYTHON', 'python')
         cmd = [python_path, target_file]
         return self.run_cmd(cmd, exe_env=self.config.project_path)
 
     def run_coverage(self) -> float:
-        """Run Python coverage analysis on Python test file.
-
-        Uses the coverage.py package to measure code coverage of Python tests.
-        Executes the test file and generates a coverage report.
-
-        :returns: Coverage percentage as float, or -1 if analysis fails
-        :rtype: float
+        """
+        Runs Python code coverage analysis using coverage.py, returning the coverage percentage.
+        :return: Coverage percentage, -1 if failed
         """
         try:
-            # Run tests with coverage
             logger.info("Running tests with coverage analysis...")
-            cmd = [self.env['PYTHON'], "-m", "coverage", "run", f"{self.config.test_file_name}.py"]
+            cmd = [self.env.get('PYTHON', 'python'), "-m", "coverage", "run", f"{self.config.test_file_name}.py"]
             output = self.run_cmd(cmd, exe_env=self.config.project_path)
-            if "Traceback" in output:
+            if "traceback" in output.lower():
                 logger.error(f"Test execution failed: {output}")
                 return -1
 
-            # Generate coverage report
             logger.info("Generating coverage report...")
-            cmd = [self.env['PYTHON'], "-m", "coverage", "report"]
+            cmd = [self.env.get('PYTHON', 'python'), "-m", "coverage", "report"]
             report = self.run_cmd(cmd, exe_env=self.config.project_path)
-            
-            # Parse coverage percentage from report
+
             try:
-                # Extract last line containing total coverage
                 total_line = report.strip().split('\n')[-1]
-                # Parse coverage percentage (typically in format "TOTAL xxx xx%")
                 coverage = float(total_line.split()[-1].replace('%', ''))
                 logger.info(f"Coverage: {coverage}%")
                 return coverage

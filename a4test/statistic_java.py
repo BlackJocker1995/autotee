@@ -4,17 +4,17 @@ from collections import defaultdict
 
 from loguru import logger
 
-from LLM.llmodel import OpenAIModel
+from LLM.llmodel import LLModel, LLMConfig
 from static.projectUtil import list_directories
 
 if __name__ == '__main__':
     # codescan = OllamaModel("qwen2.5-coder:14b")
-    codescan = OpenAIModel("gpt-4o")
+    config = LLMConfig(provider="openai", model="gpt-4o")
+    codescan = LLModel(config)
 
-    if "qwen2.5" in codescan.client_model:
-        name = "qwen2.5"
-    else:
-        name = "gpt"
+
+    name = codescan.get_short_name(config.model)
+
 
     base_path = "/home/rdhan/data/dataset/java_mul_case"
     source_path = "/home/rdhan/tee"
@@ -31,7 +31,6 @@ if __name__ == '__main__':
         for dir_item in dirs:
             item = dict()
             logger.info(f"Switch to {dir_item}.")
-            codescan.re_init_chat()
 
             if not "_java" in dir_item:
                 continue

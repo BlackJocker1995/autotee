@@ -45,7 +45,11 @@ class TestAssistance:
         self.code_dynamic.config.project_path = project_path
 
     def set_project_name(self, project_name: str):
-        self.code_dynamic.config.project_path = project_name
+        """
+        Set the project name in the code_dynamic config.
+        :param project_name: Project name string
+        """
+        self.code_dynamic.config.project_name = project_name
 
     def list_source_project(self, project_path):
         code_file_path = os.path.join(project_path, "code_file")
@@ -87,13 +91,19 @@ class TestAssistance:
                          agent: LLModel,
                          overwrite: bool,
                          is_multiple: bool) -> None:
-
+        """
+        Process a single test directory: generate and write test cases if needed.
+        :param dir_item: Directory path
+        :param agent: Language model agent
+        :param overwrite: Whether to overwrite existing test files
+        :param is_multiple: Whether to generate multiple test cases
+        """
         main_file = os.path.join(dir_item, f"main.{self.code_dynamic.config.exec_extension}")
         test_file = os.path.join(dir_item, f"test.{self.code_dynamic.config.exec_extension}")
-        
+
         if not self._should_process_test_file(test_file, overwrite, main_file):
             return
-            
+
         source_code = self._read_source_code(main_file)
         result = self.code_dynamic.design_test_cases(agent, source_code, is_multiple)
         self._write_test_file(test_file, result)
@@ -116,15 +126,13 @@ class TestAssistance:
         """Add multiple test cases"""
         self._add_test_cases(agent, project_path, overwrite, is_multiple=True)
 
-    def build_test_one(self, project_path:str, file_name:str, overwrite=False):
+    def build_test_one(self, project_path: str, file_name: str, overwrite=False):
         """
-        2 step
-        :param file_name:
-        :param project_path:
-        :param overwrite:
-        :return:
+        Build single test files in all source directories.
+        :param project_path: Root project path
+        :param file_name: File name to build
+        :param overwrite: Whether to overwrite existing builds
         """
-
         dirs = self.list_source_project(project_path)
         for dir_item in dirs:
             logger.info(f"Switch to {dir_item}.")
@@ -136,64 +144,56 @@ class TestAssistance:
 
             self.set_project_path(str(path_dir))
 
-            if self.code_dynamic.is_build_target_exit(path_dir, file_name) and not overwrite:
+            if self.code_dynamic.is_build_target_exist(file_name) and not overwrite:
                 continue
 
-            self.code_dynamic.build_file_with_fix(path_dir, file_name)
-
-    def build_test_mul(self, project_path:str, file_name:str, overwrite=False):
-        # List all source directories in the given project path
-        dirs = self.list_source_project(project_path)
-
-        # Iterate over each directory item
-        for dir_item in dirs:
-            logger.info(f"Switch to {dir_item}.")
-
-            # Construct the full path to the directory
-            path_dir = os.path.join(project_path, "code_file", dir_item)
-
-            # Check if the directory exists
-            if not os.path.exists(path_dir):
-                logger.error(f"Init {path_dir} at first")
-                continue  # Skip to the next directory if it doesn't exist
-
-            # Set the current project path to the directory path
-            self.set_project_path(str(path_dir))
-
-            # Check if the build target already exists and if overwrite is not allowed
-            if self.code_dynamic.is_build_target_exit(file_name) and not overwrite:
-                continue  # Skip building if the target exists and overwrite is False
-
-            # Build the file with necessary fixes
             self.code_dynamic.build_file_with_fix(file_name)
 
-    def convert_and_build(self, project_path:str, agent_model:str, overwrite=False):
+    def build_test_mul(self, project_path:str, file_name:str, overwrite=False):
         """
-        3 step
-        :param agent_model:
-        :param project_path:
-        :param overwrite:
-        :return:
+        Build multiple test files in all source directories.
+        :param project_path: Root project path
+        :param file_name: File name to build
+        :param overwrite: Whether to overwrite existing builds
         """
+        dirs = self.list_source_project(project_path)
 
-        # short name
+        for dir_item in dirs:
+            logger.info(f"Switch to {dir_item}.")
+
+            path_dir = os.path.join(project_path, "code_file", dir_item)
+
+            if not os.path.exists(path_dir):
+                logger.error(f"Init {path_dir} at first")
+                continue
+
+            self.set_project_path(str(path_dir))
+
+            if self.code_dynamic.is_build_target_exist(file_name) and not overwrite:
+                continue
+
+            self.code_dynamic.build_file_with_fix(file_name)
+
+    def convert_and_build(self, project_path: str, agent_model: str, overwrite=False):
+        """
+        Convert source code to Rust and build it using an LLM agent.
+        :param project_path: Root project path
+        :param agent_model: LLM model name
+        :param overwrite: Whether to overwrite existing builds
+        """
         llm_config = LLMConfig(provider="openai", model=agent_model)
         llm = LLModel.from_config(llm_config)
         name = llm.get_short_name(agent_model)
         source_path = os.path.join(f"/home/rdhan/tmp/{name}/tee")
 
         code_file_path = os.path.join(project_path, "code_file")
-
-        # List all directories within the specified path
         dirs = list_directories(code_file_path)
         dirs = [it for it in dirs if it.endswith(f"_{self.source_language}")]
         for dir_item in dirs:
             logger.info(f"Switch to {dir_item}.")
-            # Skip directories that do not contain "_" in their name
             if not f"_{self.source_language}" in dir_item:
                 continue
 
-            # Extract a hash index from the directory name for naming Rust files
             hash_index = os.path.basename(dir_item)[:8]
             source_path_dir = os.path.join(code_file_path, dir_item)
             test_file = os.path.join(source_path_dir, f"{self.test_file_name}.{self.exec}")
@@ -204,16 +204,13 @@ class TestAssistance:
                 logger.info(f"Skip this {rust_path_dir}")
                 continue
 
-            # Check if the main Java file exists; if not, log a warning and skip
             if not os.path.exists(test_file):
                 logger.warning(f"Main {self.source_language} file does not exist, finish previous step first!")
                 continue
 
-            # Open and read the Java main file
             with open(test_file, "r", encoding="utf-8") as f:
                 source_code = f.read()
 
-            # Process the code to convert it to Rust and extract dependencies
             result = self._react_convert_build_test(source_code, source_path_dir, agent_model)
             if result != -1:
                 copy_directory(source_path, rust_path_dir, ["target"])
@@ -273,28 +270,31 @@ class TestAssistance:
             with open(rust_main_file, "w", encoding="utf-8") as f:
                 f.write(result)
     
-    def rust_test_build(self, project_path:str):
+    def rust_test_build(self, project_path: str):
         """
-        5 step
-        :param project_path:
-        :return:
+        Build Rust test projects in all relevant directories.
+        :param project_path: Root project path
         """
         code_file_path = os.path.join(project_path, "code_file")
 
-        # List all directories within the specified path
         dirs = list_directories(code_file_path)
         dirs = [it for it in dirs if "_rust_" in it]
         for dir_item in dirs:
-            # Skip directories that do not contain "_" in their name
             if "failed" in dir_item or "_yes" in dir_item or "_no" in dir_item:
                 continue
 
-            if os.path.exists(os.path.join(dir_item, 'tee','target','debug','tee')):
+            if os.path.exists(os.path.join(dir_item, 'tee', 'target', 'debug', 'tee')):
                 continue
 
             logger.info(f"Switch to {dir_item}.")
 
-            target_rust = RustDynamic(BuildConfig(dir_item, "tee"))  # Updated parameter
+            target_rust = RustDynamic(BuildConfig(
+                language="rust",
+                exec_extension="rs",
+                test_file_name="tee",
+                project_path=dir_item,
+                project_name="tee"
+            ))
             target_rust.build_target()
 
     def _react_convert_build_test(self, code, path_dir, agent_model) -> int:
@@ -394,97 +394,124 @@ class TestAssistance:
         return -1
 
     def _rust_test_add(self, codescan: Type[LLModel], rust_code: str, code: str = "") -> str:
+        """
+        Generate Rust main function code based on lib.rs content and optional reference code.
+        :param codescan: LLModel instance
+        :param rust_code: Rust lib.rs source code
+        :param code: Reference code in source language
+        :return: Generated main.rs code string
+        """
         logger.debug(rust_code)
-        message = ("This function code is in lib.rs of tee project. Write a main function."
-                   # "The Rust program in main.rs reads input from the command line and forwards it to lib.rs."
-                   "Note that the top of code should be 'use tee::{function name}', "
-                   "which can import {funcion name} in lib.rs."
-                   "And remember, only return the code. ")
+        message = (
+            "This function code is in lib.rs of tee project. Write a main function. "
+            "Note that the top of code should be 'use tee::{function name}', "
+            "which can import {function name} in lib.rs. "
+            "And remember, only return the code."
+        )
         codescan.add_message('user', message)
 
-        if code != "":
-            message = f"This is its main fucntino in {self.config.source_language} version: ```{code}```"
+        if code:
+            message = f"This is its main function in {self.config.source_language} version: ```{code}```"
             codescan.add_message('user', message)
 
-        main_code = codescan.query_json(message=f"Code: ```{rust_code}```",
-                                        output_format=Output.Code)
-        main_code = main_code.code
+        main_code = codescan.query_json(message=f"Code: ```{rust_code}```", output_format=Output.Code)
+        return main_code.code
 
-        return main_code
-
-    def run_test_coverage(self, project_path:str) -> None:
-        """Run coverage analysis for all test files in project directories.
-        
-        Similar pattern to build_test_mul but for coverage analysis.
-        
-        :param project_path: Root directory containing project files
-        :type project_path: str
-        :returns: Dictionary mapping directory names to coverage percentages
-        :rtype: dict
+    def run_test_coverage(self, project_path: str) -> None:
         """
-        # List all source directories in the given project path
+        Run line coverage analysis for all test files in project directories.
+        :param project_path: Root directory containing project files
+        """
         dirs = self.list_source_project(project_path)
 
-        # Iterate over each directory item
         for dir_item in dirs:
             logger.info(f"Running coverage analysis for {dir_item}...")
 
-            # Construct the full path to the directory
             path_dir = os.path.join(project_path, "code_file", dir_item)
 
-            # Check if the directory exists
             if not os.path.exists(path_dir):
                 logger.error(f"Directory {path_dir} does not exist")
                 continue
 
-            # Set the current project path
             self.set_project_path(str(path_dir))
 
-            # Run coverage analysis 
             if hasattr(self.code_dynamic, 'run_coverage'):
                 coverage = self.code_dynamic.run_coverage()
-                if coverage:
+                if coverage is not None:
                     coverage_file = os.path.join(path_dir, "coverage.txt")
                     with open(coverage_file, "w") as f:
                         f.write(f"Coverage: {coverage}%")
             else:
                 logger.warning(f"Coverage analysis not supported for {self.config.source_language}")
 
-    def calculate_average_coverage(self, project_path: str) -> float:
-        """Calculate average coverage from coverage.txt files in project directories.
-        
+    def run_test_branch_coverage(self, project_path: str) -> None:
+        """
+        Run branch coverage analysis for all test files in project directories.
         :param project_path: Root directory containing project files
-        :type project_path: str
-        :returns: Average coverage percentage across all directories
-        :rtype: float
+        """
+        dirs = self.list_source_project(project_path)
+
+        for dir_item in dirs:
+            logger.info(f"Running branch coverage analysis for {dir_item}...")
+
+            path_dir = os.path.join(project_path, "code_file", dir_item)
+
+            if not os.path.exists(path_dir):
+                logger.error(f"Directory {path_dir} does not exist")
+                continue
+
+            self.set_project_path(str(path_dir))
+
+            if hasattr(self.code_dynamic, 'run_branch_coverage'):
+                coverage = self.code_dynamic.run_branch_coverage()
+                if coverage is not None:
+                    coverage_file = os.path.join(path_dir, "branch_coverage.txt")
+                    with open(coverage_file, "w") as f:
+                        f.write(f"Coverage: {coverage}%")
+            else:
+                logger.warning(f"Branch coverage analysis not supported for {self.config.source_language}")
+
+    def calculate_average_coverage(self, project_path: str, coverage_type: str) -> float:
+        """
+        Calculate average coverage from coverage files in project directories.
+        :param project_path: Root directory containing project files
+        :param coverage_type: "line" or "branch"
+        :return: Average coverage percentage
         """
         dirs = self.list_source_project(project_path)
         coverages = []
+        if coverage_type == "line":
+            file_name = "coverage.txt"
+        elif coverage_type == "branch":
+            file_name = "branch_coverage.txt"
+        else:
+            raise ValueError("Unsupported coverage type")
 
         for dir_item in dirs:
             path_dir = os.path.join(project_path, "code_file", dir_item)
-            coverage_file = os.path.join(path_dir, "coverage.txt")
-            
+            coverage_file = os.path.join(path_dir, file_name)
+
             if os.path.exists(coverage_file):
                 try:
                     with open(coverage_file, "r") as f:
                         content = f.read()
-                        # Extract coverage percentage from "Coverage: XX%" format
                         coverage = float(content.split(":")[1].strip().replace("%", ""))
                         coverages.append(coverage)
                 except (ValueError, IndexError) as e:
                     logger.error(f"Error reading coverage from {coverage_file}: {str(e)}")
                     continue
-        
+
         if not coverages:
             logger.warning("No coverage data found")
             return 0.0
+
+        average_coverage = sum(coverages) / len(coverages)
+        return average_coverage
+
             
     @staticmethod
     def class_generator(language) -> 'TestAssistance':
-        """
-        Generate and return an instance of the appropriate TestAssistance subclass based on the given language.
-        """
+        """Generate and return an instance of the appropriate TestAssistance subclass based on the given language."""
         if language == "java":
             return TestAssistance("java", JAVA_CONVERSION_EXAMPLES)
         elif language == "python":

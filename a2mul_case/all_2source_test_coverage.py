@@ -23,8 +23,8 @@ if __name__ == '__main__':
 
         test_assistance = TestAssistance.class_generator("java")
 
-        test_assistance.run_test_coverage(project_path)
+        test_assistance.run_test_branch_coverage(project_path)
         
-        average.append(test_assistance.calculate_average_coverage(project_path))
+        average.append(test_assistance.calculate_average_coverage(project_path, "branch"))
     
     print(np.mean(average))
