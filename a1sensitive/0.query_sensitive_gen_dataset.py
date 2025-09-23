@@ -16,6 +16,40 @@ def extract_content_fun(text):
     return matches
 
 
+def _should_skip_block(block: str) -> bool:
+    if len(block) > 10240:
+        logger.debug("Over size, skip...")
+        return True
+
+    # Check first line (only in dataset generation)
+    if not any(sub in block.splitlines()[0].lower() for sub in
+               ['token', 'password', 'credential', 'hash', 'cyber', 'key', 'serialize', 'enc', 'dec', 'chip',
+                'verif', 'sign']):
+        return True
+    return False
+
+
+def _perform_initial_sensitive_check(agent: LLModel, block: str) -> bool:
+    chat = agent.create_chat(system_prompt="", output_format=None)
+    return "Yes" in chat.invoke({"input": SensitiveSearchScenario.get_question1() + f"``` {block} ```"})
+
+
+def _get_sensitive_types(agent: LLModel):
+    chat_json = agent.create_chat(system_prompt="", output_format=Output.String)
+    result_json = chat_json.invoke({"input": SensitiveSearchScenario.get_question3()})
+    if not result_json or getattr(result_json, "result", ['']) == ['']:
+        return None
+    return result_json.result
+
+
+def _get_sensitive_details_for_type(agent: LLModel, type_item: str):
+    chat_type = agent.create_chat(system_prompt="", output_format=Output.StringList)
+    result_json = chat_type.invoke({"input": SensitiveSearchScenario.get_question4(type_item)})
+    if result_json and getattr(result_json, "result", None):
+        return result_json.result
+    return None
+
+
 def query_sensitive(agent: LLModel, dir_item: str, in_name: str, out_name: str) -> None:
     codes = read_code_block(dir_item, in_name)
     out = []
@@ -23,35 +57,23 @@ def query_sensitive(agent: LLModel, dir_item: str, in_name: str, out_name: str) 
     for code in tqdm(codes, desc="Processing", unit="item", mininterval=1):
         block = code["block"]
 
-        if len(block) > 10240:
-            logger.debug("Over size, skip...")
+        if _should_skip_block(block):
             continue
 
-        # Check first line (only in dataset generation)
-        if not any(sub in block.splitlines()[0].lower() for sub in
-                   ['token', 'password', 'credential', 'hash', 'cyber', 'key', 'serialize', 'enc', 'dec', 'chip',
-                    'verif', 'sign']):
+        if not _perform_initial_sensitive_check(agent, block):
             continue
 
-        # 新接口：每次新建 chat runnable
-        chat = agent.create_chat(system_prompt="", output_format=None)
-        if "Yes" not in chat.invoke({"input": SensitiveSearchScenario.get_question1() + f"``` {block} ```"}):
+        type_list = _get_sensitive_types(agent)
+        if not type_list:
             continue
 
-        chat_json = agent.create_chat(system_prompt="", output_format=Output.String)
-        result_json = chat_json.invoke({"input": SensitiveSearchScenario.get_question3()})
-        if not result_json or getattr(result_json, "result", ['']) == ['']:
-            continue
-
-        type_list = result_json.result
         logger.debug(f"{block} ---- {type_list}")
 
         sensitive_dict = {}
         for type_item in type_list:
-            chat_type = agent.create_chat(system_prompt="", output_format=Output.StringList)
-            result_json = chat_type.invoke({"input": SensitiveSearchScenario.get_question4(type_item)})
-            if result_json and getattr(result_json, "result", None):
-                sensitive_dict[type_item] = result_json.result
+            details = _get_sensitive_details_for_type(agent, type_item)
+            if details:
+                sensitive_dict[type_item] = details
 
         if sensitive_dict:
             code.update({"sensitive": sensitive_dict})
@@ -66,8 +88,8 @@ if __name__ == '__main__':
     config = LLMConfig(provider="ollama", model="qwen2.5-coder:32b")
     agent = LLModel.from_config(config)
     overwrite = True
-    in_name = f"java"
-    out_name = f"{agent.get_short_name()}_sen"
+    in_name = "java"
+    out_name = LLModel.get_short_name("qwen2.5-coder:32b")
 
     dirs = list_directories("/home/rdhan/data/dataset/java")
 
