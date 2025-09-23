@@ -5,7 +5,6 @@ from typing import Any, Dict, Optional, List, Union, Type
 from langchain.tools import Tool, StructuredTool
 import os
 
-import vllm
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_deepseek import ChatDeepSeek
@@ -20,7 +19,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts import HumanMessagePromptTemplate
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_community.chat_models.tongyi import ChatTongyi
-from langchain_community.llms import VLLM
 from langchain_community.llms import VLLMOpenAI
 from langchain_ollama import ChatOllama
 
