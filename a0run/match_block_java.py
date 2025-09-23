@@ -6,4 +6,4 @@ from a0run.match_block_common import run_processing
 if __name__ == '__main__':
     # Run the common processing logic for Java projects
     # Arguments: Language string, Dataset Path, AST File Suffix
-    run_processing("java", "/home/rdhan/data/dataset/java", "java_ast")
+    run_processing("java", "/home/rdhan/data/dataset/java")

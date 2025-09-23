@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 NUM_THREADS = 6
 
 @ray.remote
-def process_directory(language: str, dir_item: str, ast_file_suffix: str, overwrite: bool):
+def process_directory(language: str, dir_item: str, overwrite: bool):
     """
     Ray remote function to process a single directory.
     It initializes a code analyzer, finds specific files, extracts AST code blocks,
@@ -26,7 +26,7 @@ def process_directory(language: str, dir_item: str, ast_file_suffix: str, overwr
     # Create a code analyzer instance using the factory function
     code_ana = create_code_analyzer(language)
     # Skip processing if AST file already exists and overwrite is False
-    if not overwrite and os.path.exists(f"{dir_item}/{ast_file_suffix}.json"):
+    if not overwrite and os.path.exists(f"{dir_item}/{language.lower()}_ast.json"):
         return None
     
     # Find specific files within the directory
@@ -35,7 +35,7 @@ def process_directory(language: str, dir_item: str, ast_file_suffix: str, overwr
     code_blocks: List[Dict[str, Any]] = code_ana.ast_code_from_files(files)
     logger.info(f"{dir_item}, We get {len(code_blocks)} code blocks.")
     # Save the extracted code blocks to a JSON file
-    code_ana.save_code_block(dir_item, code_blocks, ast_file_suffix)
+    code_ana.save_code_block(dir_item, code_blocks, f"{language.lower()}_ast")
     return len(code_blocks)
 
 def create_code_analyzer(language: str) -> ProgramCode:
@@ -73,7 +73,8 @@ def split_into_chunks(dirs: list[str]) -> list[list[str]]:
         chunks.append(dirs[start_index:end_index])
     return chunks
 
-def run_processing(language: str, dataset_path: str, ast_file_suffix: str, overwrite: bool = False):
+def run_processing(language: str, dataset_path: str, overwrite: bool = False):
+    ast_file_suffix = f"{language.lower()}_ast"
     """
     Initializes Ray and orchestrates the parallel processing of directories.
     It uses a given language to create a code_analyzer_class to process files in each directory,
@@ -97,7 +98,7 @@ def run_processing(language: str, dataset_path: str, ast_file_suffix: str, overw
 
         logger.info(f"Starting processing of {len(dirs)} directories")
         # Create Ray futures for parallel execution of process_directory for each directory
-        futures = [process_directory.remote(language, dir_item, ast_file_suffix, overwrite) for dir_item in dirs]
+        futures = [process_directory.remote(language, dir_item, overwrite) for dir_item in dirs]
         
         # Wait for all futures to complete and get the results
         results = ray.get(futures)
