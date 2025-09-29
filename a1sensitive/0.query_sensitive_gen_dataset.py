@@ -85,13 +85,13 @@ def query_sensitive(agent: LLModel, dir_item: str, in_name: str, out_name: str) 
 
 if __name__ == '__main__':
     # codescan = OpenAIModel("gpt-4o")
-    config = LLMConfig(provider="ollama", model="qwen2.5-coder:32b")
+    config = LLMConfig(provider="vllm", model="qwen3-coder:30b")
     agent = LLModel.from_config(config)
     overwrite = True
     in_name = "java"
-    out_name = LLModel.get_short_name("qwen2.5-coder:32b")
+    out_name = LLModel.get_short_name("qwen3-coder:30b")
 
-    dirs = list_directories("/home/rdhan/data/dataset/java")
+    dirs = list_directories("/home/rdhan/data/dataset/test")
 
     for dir_item in dirs:
         logger.info(f"Switch to {dir_item}.")

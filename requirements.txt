@@ -1,3 +1,10 @@
-tree-sitter-java==0.23.5
-tree-sitter-python==0.23.5
+tree-sitter-java
+tree-sitter-python
 ray
+langgraph
+langchain
+langchain-community
+langchain-openai
+langchain-google-genai
+langchain-deepseek
+langchain-ollama

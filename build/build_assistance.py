@@ -339,7 +339,7 @@ class TestAssistance:
 
         tools = create_convert_tools(path_dir, rust_project_path, language=self.source_language)
 
-        agent = llm.create_agent(tools)
+        agent = llm.create_tool_react(tools)
         return agent
 
     def _analyze_code(self, agent, code) -> bool:

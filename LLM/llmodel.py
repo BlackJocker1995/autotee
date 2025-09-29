@@ -1,26 +1,24 @@
+from json import tool
 from loguru import logger
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 from typing import Any, Dict, Optional, List, Union, Type
-from langchain.tools import Tool, StructuredTool
 import os
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_deepseek import ChatDeepSeek
 from langgraph.prebuilt import create_react_agent
-from langchain.chains import ConversationChain
-from langgraph.graph.graph import CompiledGraph
-from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import Runnable
 from pydantic import SecretStr
 from langchain_core.prompts import PromptTemplate
 from abc import ABC, abstractmethod
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts import HumanMessagePromptTemplate
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_community.chat_models.tongyi import ChatTongyi
-from langchain_community.llms import VLLMOpenAI
 from langchain_ollama import ChatOllama
+from langchain_community.llms.vllm import VLLMOpenAI
 
 
 class LLMConfig(BaseSettings):
@@ -191,7 +189,8 @@ class LLModel(ABC):
         return out
     
     
-    def create_agent(self, tools: list) -> CompiledGraph:
+
+    def create_tool_react(self, tools: list, system_prompt:str) -> Runnable:
         """
         Creates an agent using the LLM and provided tools.
 
@@ -201,6 +200,7 @@ class LLModel(ABC):
         Returns:
             CompiledGraph: The compiled graph representing the agent.
         """
+
         if self.llm is None:
             raise ValueError("LLM model not initialized.")
-        return create_react_agent(self.llm, tools=tools)
+        return create_react_agent(self.llm, tools=tools, prompt=SystemMessage(content=system_prompt))
