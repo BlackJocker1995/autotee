@@ -1,5 +1,4 @@
 import os
-import re
 
 from loguru import logger
 from tqdm import tqdm
@@ -7,13 +6,27 @@ from tqdm import tqdm
 from LLM.llmodel import LLMConfig, LLModel
 from LLM.output import Output
 from LLM.scenarios.sensitive_search import SensitiveSearchScenario
-from static.projectUtil import read_code_block, list_directories
+from static.projectUtil import read_code_block, list_directories, save_code_block
+
+BLOCK_SIZE_LIMIT = 10240
+LLM_POSITIVE_RESPONSE = "Yes"
+LLM_SYSTEM_PROMPT = ""
+LLM_PROVIDER = "vllm"
+LLM_MODEL = "Qwen3-coder:30b"
+INPUT_NAME_PREFIX = "java_leaf"
+DATASET_PATH = "/home/rdhan/data/dataset/test"
+OUTPUT_NAME_SUFFIX = "_sen"
 
 
-def extract_content_fun(text):
-    pattern = r'\*\*(.*?)\*\*'
-    matches = re.findall(pattern, text)
-    return matches
+
+def _invoke_llm_chat(agent: LLModel, prompt: str, output_format=None):
+    if output_format:
+        chat = agent.create_chat(system_prompt=LLM_SYSTEM_PROMPT, output_format=output_format)
+    else:
+        chat = agent.create_chat(system_prompt=LLM_SYSTEM_PROMPT)
+    result = chat.invoke({"input": prompt})
+    logger.debug(result)
+    return result
 
 
 def query_sensitive(agent: LLModel, dir_item: str, in_name: str, out_name: str) -> None:
@@ -21,55 +34,45 @@ def query_sensitive(agent: LLModel, dir_item: str, in_name: str, out_name: str) 
     out = []
 
     for code in tqdm(codes, desc="Processing", unit="item", mininterval=1):
-        block = code["block"]
+        block = code["code"]
 
-        if len(block) > 10240:
+        if len(block) > BLOCK_SIZE_LIMIT:
             logger.debug("Over size, skip...")
             continue
 
-        # Check first line (only in dataset generation)
-        # if not any(sub in block.splitlines()[0].lower() for sub in
-        #            ['token', 'password', 'credential', 'hash', 'cyber', 'key', 'serialize', 'enc', 'dec', 'chip',
-        #             'verif', 'sign']):
-        #     continue
+        # First question
+        result1 = _invoke_llm_chat(agent, "This is the source code of the function. If it meets all the specified conditions, please respond with **Yes**; otherwise, respond with **No**." + f"``` {block} ```", output_format=bool)
+        if not result1 or getattr(result1, "answer") == False:
+            continue
+
+        # Second question
+        result2 = _invoke_llm_chat(agent, "Which specific subcategories type is it involve in?" + f"``` {block} ```", output_format=Output.SensitiveType)
+        if not result2:
+            continue
+
+        # Third question
+        result3 = _invoke_llm_chat(agent, f"List the code statements that involved in {result2}:" + f"``` {block} ```", output_format=Output.SensitiveStatement)
+        if not result3:
+            continue
         
-        # 新接口：每次新建 chat runnable
-        chat = agent.create_chat(system_prompt="", output_format=None)
-        if "Yes" not in chat.invoke({"input": SensitiveSearchScenario.get_question1() + f"``` {block} ```"}):
-            continue
+        # If all three questions pass, retain the item and add the new attributes
+        code["sensitive_check"] = result1.answer
+        code["sensitive_type"] = result2.answer
+        code["sensitive_statements"] = result3.answer
+        out.append(code)
+    
+    save_code_block(dir_item, out, out_name)
 
-        chat_json = agent.create_chat(system_prompt="", output_format=Output.String)
-        result_json = chat_json.invoke({"input": SensitiveSearchScenario.get_question3()})
-        if not result_json or getattr(result_json, "result", ['']) == ['']:
-            continue
-
-        type_list = result_json.result
-        logger.debug(f"{block} ---- {type_list}")
-
-        sensitive_dict = {}
-        for type_item in type_list:
-            chat_type = agent.create_chat(system_prompt="", output_format=Output.StringList)
-            result_json = chat_type.invoke({"input": SensitiveSearchScenario.get_question4(type_item)})
-            if result_json and getattr(result_json, "result", None):
-                sensitive_dict[type_item] = result_json.result
-
-        if sensitive_dict:
-            code.update({"sensitive": sensitive_dict})
-            logger.debug(f"Detail: {sensitive_dict}")
-            out.append(code)
-
-    # save_code_block(dir_item, out, out_name)
-
-
+       
 if __name__ == '__main__':
     # codescan = OpenAIModel("gpt-4o")
-    config = LLMConfig(provider="ollama", model="qwen2.5-coder:32b")
+    config = LLMConfig(provider=LLM_PROVIDER, model=LLM_MODEL)
     agent = LLModel.from_config(config)
     overwrite = False
-    in_name = f"java"
-    out_name = f"{agent.get_short_name()}_sen"
+    in_name = f"{INPUT_NAME_PREFIX}"
+    out_name = f"{agent.get_description()}{OUTPUT_NAME_SUFFIX}"
 
-    dirs = list_directories("/home/rdhan/data/dataset/java")
+    dirs = list_directories(DATASET_PATH)
 
     for dir_item in dirs:
         logger.info(f"Switch to {dir_item}.")

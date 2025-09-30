@@ -1,9 +1,9 @@
+import json
+import os
 
 from typing import Optional, Dict
 
 from pydantic import Field
-
-from LLM.action import Scenario
 # from static.code_match import determine_language_by_extension
 def determine_language_by_extension(file_path: str):
     """
@@ -29,7 +29,7 @@ def determine_language_by_extension(file_path: str):
         return "unknown"
 
 
-class SensitiveSearchScenario(Scenario):
+class SensitiveSearchScenario():
 
 
     sensitive_handle = {
@@ -44,45 +44,27 @@ class SensitiveSearchScenario(Scenario):
         return str.format("[ {} ]", ", ".join(cls.sensitive_handle))
 
     @classmethod
-    def get_question1(cls) -> str:
-        question1 = (
-            f"This is the source code of the function. "
-            f"If it meets all the specified conditions, please respond with **Yes**; "
-            f"otherwise, respond with **No**. "
-            f"Conditions1: The input (if have) and output types are base types, such as String, int, or byte[]."
-            f"Conditions2: this code snippet use or implement any operation among {list(cls.sensitive_handle.keys())}."
-            f"Specifically, ")
-        for it in cls.sensitive_handle.keys():
-            question1 += f"{it} contains {cls.sensitive_handle[it]} ;"
-        return question1
-
-    # @classmethod
-    # def get_question2(cls) -> str:
-    #     return ("Does this code utilize the operation, or does it implement the operation?"
-    #             " Only answer **utilize** or **implement**")
+    def check_sensitive_operation_prompt(cls) -> str:
+        with open(os.path.join(os.path.dirname(__file__), 'sensitive_search_prompts.json'), 'r') as f:
+            prompts = json.load(f)
+        sensitive_keys = list(cls.sensitive_handle.keys())
+        sensitive_details = "".join([f"{it} contains {cls.sensitive_handle[it]} ;" for it in sensitive_keys])
+        return prompts["question1"].format(sensitive_keys=sensitive_keys, sensitive_details=sensitive_details)
+    
+    @classmethod
+    def get_sensitive_types_prompt(cls) -> str:
+        with open(os.path.join(os.path.dirname(__file__), 'sensitive_search_prompts.json'), 'r') as f:
+            prompts = json.load(f)
+        
+        sensitive_subcategories = []
+        for key in cls.sensitive_handle:
+            sensitive_subcategories.extend([s.strip() for s in cls.sensitive_handle[key].split(',')])
+        
+        sensitive_subcategories_list = ", ".join(sensitive_subcategories)
+        return prompts["question_sensitive_types"].format(sensitive_subcategories_list=sensitive_subcategories_list)
 
     @classmethod
-    def get_question3(cls) -> str:
-        return ("Which specific subcategories type is it involve in? Like Hash,Serialization... "
-                "note cryptography and data serialization are not subcategories.")
-
-    @classmethod
-    def get_question4(cls, que: str) -> str:
-        return rf"List the code statements that involved in {que}."
-
-
-
-    class Actions(Scenario.Actions):
-        @staticmethod
-        def static_code_structure(file_path, method_name):
-            """
-            Trace the source structure of a function named "method_name".
-            :param file_path: the source file where other method call "method_name".
-            :param method_name: name of the method to be traced.
-            :return: source structure of "method_name"
-            """
-            # certain which program language is used
-            code_class = determine_language_by_extension(file_path)
-
-            # match and return
-            return code_class.search_code_source(file_path, method_name)
+    def get_sensitive_details_prompt(cls, que: str) -> str:
+        with open(os.path.join(os.path.dirname(__file__), 'sensitive_search_prompts.json'), 'r') as f:
+            prompts = json.load(f)
+        return prompts["question4"].format(query=que)

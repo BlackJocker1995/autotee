@@ -78,13 +78,13 @@ class LLModel(ABC):
         "qwen": ChatTongyi,  # Assuming Qwen is compatible with OpenAI's interface
         "deepseek": ChatDeepSeek,
         "google": ChatGoogleGenerativeAI,
-        'vllm': VLLMOpenAI,
+        'vllm': ChatOpenAI,
         'ollama': ChatOllama
     }
     # Provider-specific configuration adjustments
     _provider_base_urls = {
         "ollama": "http://localhost:11434",
-        "vllm": "http://localhost:8000/v1"
+        "vllm": "http://localhost:30000/v1"
     }
     def __init__(self, config: "LLMConfig"):
         """
@@ -116,6 +116,17 @@ class LLModel(ABC):
         )
        
 
+    def get_description(self) -> str:
+        """
+        Returns a description of the LLM model.
+
+        Returns:
+            str: A description of the LLM model, suitable for use as a directory name.
+        """
+        # Replace characters potentially problematic in directory names (like '.') with underscores.
+        safe_model_name = self.config.model.replace('.', '_').replace('/', '_').replace(':', '-')
+        return f"{self.provider}_{safe_model_name}"
+    
     @classmethod
     def get_short_name(cls,model_client:str) -> str:
         """
