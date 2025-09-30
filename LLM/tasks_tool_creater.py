@@ -29,7 +29,7 @@ def create_transform_tools(project_root_path: str,  language:str) -> list[BaseTo
         CargoCheckTool(project_root_path=project_root_path)
     ]
     # Only modify the rust code
-    rust_project_path = os.path.join(project_root_path,"rust")
+    rust_project_path = os.path.join(project_root_path)
     toolkit = FileManagementToolkit(
         root_dir=str(rust_project_path),
         selected_tools=["list_directory", "read_file", "write_file"]

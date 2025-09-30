@@ -35,8 +35,10 @@ def run_transform_workflow(project_path: str, language: str, llm_config: LLMConf
         hash_subdir = os.path.join(project_code_files_dir, code_hash)
     
         cargo_new(hash_subdir)
-        # TODO, change original SensitiveFun.java to a remote call.
-        # 使用内存存储json,然后rust程序读取
+        java_main_file = os.path.join(hash_subdir, "src", "main", "java", "com", "example", "project","SensitiveFun.java")
+        with open(java_main_file) as f:
+            source_code = f.read
+        
         
         
         created_tools = create_transform_tools(
@@ -54,16 +56,26 @@ def run_transform_workflow(project_path: str, language: str, llm_config: LLMConf
         llm = LLModel.from_config(llm_config) # Instantiate LLModel
         agent_executor = llm.create_tool_react(created_tools, system_prompt)
 
+        #TODO Detailed prompt transform and as a IPC
         initial_input = {"messages": [("user",f"""
-        Generate a diverse set of test inputs for  {language} project located at `{hash_subdir}`, aiming to maximize both line and branch coverage. 
-        Enhance the unit test coverage (line and branch) for the specified code unit.
-        Ensure generated tests are syntactically correct, invoke relevant methods with appropriate inputs, and include assertions to validate expected behavior.
+        Your mission is to translate the function '{source_code}' in {language} project as a functional equivalent Rust project, saving the new implementation to `rust/src/lib.rs`.
+        You must operate with complete autonomy, making all decisions based solely on the provided project context, without requesting clarification, additional information, or external resources.
         
-        **Completion Criteria:** You have successfully completed this task only when both of the following conditions are met:
-        1. The task concludes after three consecutive attempts show no improvement in line and branch coverage.
-        2. Test.java is not empty.
-        3. All unit tests execute successfully, reporting 'Failures: 0, Errors: 0, Skipped: 0'
+        **Current File Structure:**
+        1. **{language} file**: `src`
+        2. **rust file**: `rust`
+
+        **Core Requirements:**
+        The body of the original Java function needs to be refactored into a relay function that uses stdin/stdout to forward its arguments to the Rust side. The main function on the Rust side will receive the arguments, call the equivalent function in lib.rs, and then return the result to Java.
+        You need to run Java unit tests and ensure the results remain unchanged after converting to remote calls.
         
+        ## Technical Requirements
+        1.  **Communication Method**: Java and Rust will communicate via standard input (`stdin`) and standard output (`stdout`). Java will write parameters to the Rust process's `stdin` and read results from its `stdout`.
+        2.  **Data Protocol**: All communication must use a standardized **JSON** format to ensure robustness and scalability.
+            *   **Java to Rust (Request)**: Must be a JSON object containing `function_name` and `params` fields.
+            *   **Rust to Java (Response)**: Must be a JSON object containing a `status` field (`success` or `error`). It should include a `data` field on success and an `error_message` field on failure.
+        3.  **Rust Program**: Must be a standalone, executable binary. It should be implemented as a **generic dispatcher**, capable of calling different function logic based on the `function_name` in the request.
+        4.  **Java Program**: Must include a generic invocation method, and the original functions should be refact
         """
         )]}
         

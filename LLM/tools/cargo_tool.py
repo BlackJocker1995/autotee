@@ -75,6 +75,6 @@ class CargoCheckTool(BaseTool):
         if finished_pattern.search(output):
             if error_pattern.search(output):
                 return output
-            return f"{finish_str}. The project is executable."
+            return "The project is executable."
         else:
             return output
