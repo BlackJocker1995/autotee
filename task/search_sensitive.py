@@ -1,5 +1,6 @@
 
 import os
+import json
 
 from loguru import logger
 from tqdm import tqdm
@@ -23,19 +24,17 @@ OUTPUT_NAME_SUFFIX = "_sen"
 
 def _invoke_llm_chat(agent: LLModel, prompt: str, output_format=None):
     if output_format:
-        chat = agent.create_chat(system_prompt=LLM_SYSTEM_PROMPT, output_format=output_format)
+        chat = agent.create_stateless_chat(system_prompt=LLM_SYSTEM_PROMPT, output_format=output_format)
     else:
-        chat = agent.create_chat(system_prompt=LLM_SYSTEM_PROMPT)
+        chat = agent.create_stateless_chat(system_prompt=LLM_SYSTEM_PROMPT)
     result = chat.invoke({"input": prompt})
-    logger.debug(result)
     return result
 
 
 def query_sensitive_project(project_path: str, language: str, llm_config: LLMConfig) -> None:
     agent = LLModel.from_config(llm_config)
-    
     in_name = f"{language}_leaf"
-    out_name = f"{agent.get_description()}{OUTPUT_NAME_SUFFIX}"
+    out_name = f"{llm_config.get_description()}{OUTPUT_NAME_SUFFIX}"
 
     logger.info(f"Switch to {project_path}.")
     input_dir = os.path.join(project_path, "ana_json")
@@ -50,24 +49,27 @@ def query_sensitive_project(project_path: str, language: str, llm_config: LLMCon
             continue
 
         # First question
-        result1 = _invoke_llm_chat(agent, "This is the source code of the function. If it meets all the specified conditions, please respond with **Yes**; otherwise, respond with **No**." + f"``` {block} ```", output_format=Output.Bool)
+        result1 = _invoke_llm_chat(agent, "Does this function utilize or implement any operations related to [cryptography, serialization]? Specifically, cryptography includes [Encryption, Decryption, Signature, Verification, Hash, Seed, Random]; serialization includes [Serialization, Deserialization]" + f"``` {block} ```", output_format=Output.Bool)
         if not result1 or getattr(result1, "answer") == False:
             continue
 
         # Second question
-        result2 = _invoke_llm_chat(agent, "Which specific subcategories type is it involve in?" + f"``` {block} ```", output_format=Output.SensitiveType)
-        if not result2:
+        result2 = _invoke_llm_chat(agent, "Which specific subcategories type is it involve in?" + f"``` {block} ```  Specifically, cryptography includes [Encryption, Decryption, Signature, Verification, Hash, Seed, Random]; serialization includes [Serialization, Deserialization]", output_format=Output.SensitiveType)
+        if not result2 or not result2.type_list:
             continue
+        
+        sensitive_types = list(set(result2.type_list))
 
         # Third question
-        result3 = _invoke_llm_chat(agent, f"List the code statements that involved in {result2}:" + f"``` {block} ```", output_format=Output.SensitiveStatement)
-        if not result3:
+        result3 = _invoke_llm_chat(agent, f"List the code statements that involved in {sensitive_types}:" + f"``` {block} ```  Specifically, cryptography includes [Encryption, Decryption, Signature, Verification, Hash, Seed, Random]; serialization includes [Serialization, Deserialization]", output_format=Output.SensitiveStatement)
+        if not result3 or not result3.statements:
             continue
         
         # If all three questions pass, retain the item and add the new attributes
         code["sensitive_check"] = result1.answer
-        code["sensitive_type"] = result2.type_list
-        code["sensitive_statements"] = result3.statements
+        code["sensitive_type"] = sensitive_types
+        statements_dict = {item.type: item.statements for item in result3.statements}
+        code["sensitive_statements"] = statements_dict
         out.append(code)
     
     output_dir = os.path.join(project_path, "ana_json")

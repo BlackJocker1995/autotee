@@ -7,19 +7,21 @@ class Output:
     class SensitiveType(BaseModel):
         type_list: Optional[List[Literal["Encryption", "Decryption", "Signature", "Verification", "Hash", "Seed", "Random", "Serialization", "Deserialization"]]] = Field(
             default_factory=list,
-            description="List of sensitive operation types. Must be selected from: Encryption, Decryption, Signature, Verification, Hash, Seed, Random, Serialization, Deserialization."
+            description="List of sensitive operation. None if no sensitive operation appear"
         )
 
     class SensitiveStatementItem(BaseModel):
         type: Literal["Encryption", "Decryption", "Signature", "Verification", "Hash", "Seed", "Random", "Serialization", "Deserialization"]
-        statement: str
+        statements: List[str] = Field(description="List of code statements for the given sensitive type.")
 
     class SensitiveStatement(BaseModel):
         """
         Used to answer 'List the code statements that involved in {query}'.
-        The dictionary key represents the sensitive operation type, and the value is the specific code statement.
         """
-        statements: Optional[List['Output.SensitiveStatementItem']] = Field(default_factory=list)
+        statements: Optional[List['Output.SensitiveStatementItem']] = Field(
+            default_factory=list,
+            description="A list of objects, where each object contains a sensitive operation type and a list of corresponding code statements."
+        )
 
     class String(BaseModel):
         """Single string result."""

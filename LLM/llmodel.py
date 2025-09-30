@@ -199,6 +199,35 @@ class LLModel(ABC):
 
         return out
     
+    def create_stateless_chat(self, system_prompt: str = "", output_format: Optional[Type[BaseModel]] = None):
+        """
+        Creates a stateless chat runnable that does not modify the instance's system prompt.
+
+        Args:
+            system_prompt (str): The system prompt to use for this chat.
+            output_format (Optional[Type[BaseModel]]): The Pydantic model for structured output.
+
+        Returns:
+            A runnable chat object.
+        """
+        if self.llm is None:
+            raise ValueError("LLM model not initialized.")
+
+        # Use the provided system prompt or the instance's default
+        current_prompt = system_prompt if system_prompt else self.system_prompt
+        
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content=current_prompt),
+            ("human", "{input}")
+        ])
+     
+        if output_format:
+            out = prompt | self.llm.with_structured_output(output_format)
+        else:
+            out = prompt | self.llm
+
+        return out
+    
     
 
     def create_tool_react(self, tools: list, system_prompt:str) -> Runnable:

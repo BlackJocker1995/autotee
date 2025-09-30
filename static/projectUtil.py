@@ -19,7 +19,7 @@ def save_code_block(path:str, code_blocks:list[dict], name="data"):
     :type name: str, optional
     """
     with open(f'{path}/{name}.json', 'w', encoding='utf-8') as json_file:
-        json.dump(code_blocks, json_file)
+        json.dump(code_blocks, json_file, indent=4)
 
 def read_code_block(path:str, name="data") -> list[dict]:
     """
