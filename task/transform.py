@@ -36,8 +36,7 @@ def run_transform_workflow(project_path: str, language: str, llm_config: LLMConf
     
         cargo_new(hash_subdir)
         # TODO, change original SensitiveFun.java to a remote call.
-        # 1. find SensitiveFun.java
-        # 2. replace its function's body to a remote call pointing to a rust server. The remote call forward its argument as gson to the rust.
+        # 使用内存存储json,然后rust程序读取
         
         
         created_tools = create_transform_tools(
