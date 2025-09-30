@@ -1,6 +1,7 @@
 import os
 from LLM.llmodel import LLMConfig, LLModel
-from LLM.tasks_tool_creater import create_test_gen_tools
+from LLM.tasks_tool_creater import create_test_gen_tools, create_transform_tools
+from LLM.tools.cargo_tool import cargo_new
 from static.projectUtil import read_code_block, save_code_block, short_hash
 from loguru import logger
 
@@ -32,37 +33,14 @@ def run_transform_workflow(project_path: str, language: str, llm_config: LLMConf
 
     for i, code_hash in enumerate(code_block_hashes):
         hash_subdir = os.path.join(project_code_files_dir, code_hash)
+    
+        cargo_new(hash_subdir)
+        # TODO, change original SensitiveFun.java to a remote call.
+        # 1. find SensitiveFun.java
+        # 2. replace its function's body to a remote call pointing to a rust server. The remote call forward its argument as gson to the rust.
         
-        # Define Maven standard directory structure
-        java_main_dir = os.path.join(hash_subdir, "src", "main", "java", "com", "example", "project")
-        java_test_dir = os.path.join(hash_subdir, "src", "test", "java", "com", "example", "project")
-
-        # Ensure Maven directories exist
-        os.makedirs(java_main_dir, exist_ok=True)
-        os.makedirs(java_test_dir, exist_ok=True)
-
-        source_code_file = "SensitiveFun.java"
-        original_code_file_path = os.path.join(java_main_dir, source_code_file)
         
-        # For Java, create a Test.java file
-        test_file_name = "SensitiveFunTest.java"
-        test_file_path = os.path.join(java_test_dir, test_file_name)
-        
-        # Create an empty Test.java file in the correct Maven test directory
-        with open(test_file_path, "w", encoding="utf-8") as f:
-            f.write("") # Create an empty file
-        logger.info(f"Created empty test file: {test_file_path}")
-
-        # Get pom.xml template content and replace artifactId
-        pom_content = get_java_pom_template()
-        pom_content = pom_content.replace("REPLACE_ME_ARTIFACT_ID", code_hash)
-
-        pom_file_path = os.path.join(hash_subdir, "pom.xml")
-        with open(pom_file_path, "w", encoding="utf-8") as f:
-            f.write(pom_content)
-        logger.info(f"Created pom.xml for Maven project at: {pom_file_path}")
-     
-        created_tools = create_test_gen_tools(
+        created_tools = create_transform_tools(
             project_root_path=hash_subdir,
             language=language,
         )
