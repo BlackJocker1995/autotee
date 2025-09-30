@@ -13,6 +13,7 @@ from LLM.llmodel import LLMConfig
 from task.match_block_common import run_processing
 from task.search_sensitive import query_sensitive_project
 from task.create_test import run_create_test_workflow
+from task.write_fun2file import write_sen2file
 
 
 def main():
@@ -29,7 +30,9 @@ def main():
     task_configs = {
         "leaf": {"func": run_processing, "params": {}},
         "sensitive": {"func": query_sensitive_project, "params": {"llm_config": LLMConfig(provider='vllm', model='Qwen3-coder:30b')}},
-        "create_test": {"func": run_create_test_workflow, "params": {"llm_config": LLMConfig(provider='vllm', model='Qwen3-coder:30b')}},
+        "write": {"func": write_sen2file, "params": {"llm_config": LLMConfig(provider='vllm', model='Qwen3-coder:30b')}},
+        "test": {"func": run_create_test_workflow, "params": {"llm_config": LLMConfig(provider='vllm', model='Qwen3-coder:30b')}},
+        
     }
     # Check if correct number of arguments provided
     if len(sys.argv) != 2:

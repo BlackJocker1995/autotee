@@ -1,0 +1,41 @@
+import os
+from pathlib import Path
+from typing import Optional
+from langchain_core.tools import BaseTool
+from langchain_community.agent_toolkits import FileManagementToolkit
+
+from LLM.tools.file_tool import ApplyDiffTool, ListProjectStructureTool
+from LLM.tools.language_tools import JacocCoverageTool, MavenExecuteUnitTestTool
+
+
+
+def create_test_gen_tools(project_root_path: str,  language:str) -> list[BaseTool]:
+    """
+    Factory function to create common project tools, including file management rooted at project_path.
+    Custom tools will have project_path, rust_name, and test_number bound via closure.
+    File management tools will operate relative to project_path.
+
+    Args:
+        project_path: The root path for the project, used by custom tools and file management.
+        test_number: The expected number of passing tests for cargo_test.
+        fileconfig: Optional dict specifying directory permissions, e.g. {".": "r", "rust": "rw"}
+
+    Returns:
+        A list of configured common and file management tool functions.
+    """
+    tools = [
+        ListProjectStructureTool(project_root_path=project_root_path),
+        ApplyDiffTool(project_root_path=project_root_path),
+        JacocCoverageTool(project_root_path=project_root_path),
+        MavenExecuteUnitTestTool(project_root_path=project_root_path, is_end_point=False)
+    ]
+
+    toolkit = FileManagementToolkit(
+        root_dir=str(project_root_path),
+        selected_tools=["list_directory", "read_file", "write_file"]  # 选择需要的工具
+    )
+    root_tools = toolkit.get_tools()
+    tools.extend(root_tools)
+    return tools
+
+
