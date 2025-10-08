@@ -182,3 +182,150 @@ class JacocCoverageTool(BaseTool):
              logger.exception(f"An unexpected error occurred during Java unit test execution")
              return f"An unexpected error occurred during Java unit test execution: {e}"
 
+
+class LinkJava2Rust(BaseTool):
+    name: str = "link_java2rust"
+    description: str = '''
+    A tool for linking Java functions to Rust implementations to check test input consistency.
+    This tool reads Java and Rust templates and adapts them for different function signatures.
+    '''
+    
+    project_root_path: str
+    
+    def __init__(self, project_root_path: str, **kwargs):
+        super().__init__(project_root_path = project_root_path, **kwargs)
+
+    def _read_template(self, template_path: str) -> str:
+        """Read template file content."""
+        try:
+            with open(template_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except Exception as e:
+            logger.error(f"Failed to read template {template_path}: {e}")
+            return ""
+
+    def _generate_java_code(self, function_name: str, arguments: dict, return_type: str) -> str:
+        """Generate Java code by adapting the template."""
+        java_template_path = os.path.join(self.project_root_path, 'utils', 'java', 'java_link_template.java')
+        template = self._read_template(java_template_path)
+        if not template:
+            return ""
+
+        # Replace function name occurrences
+        template = template.replace('hash', function_name)
+        
+        # Replace function signature
+        signature_params = []
+        for param_name, param_type in arguments.items():
+            signature_params.append(f"{param_type} {param_name}")
+        new_signature = f"public static {return_type} {function_name}({', '.join(signature_params)})"
+        template = template.replace('public static int hash(byte[] input, int seed)', new_signature)
+
+        # Replace return type handling using mapping
+        return_type_mapping = {
+            'int': 'getAsInt',
+            'String': 'getAsString',
+            'boolean': 'getAsBoolean',
+            'double': 'getAsDouble',
+            'float': 'getAsFloat',
+            'long': 'getAsLong'
+        }
+        
+        getter_method = return_type_mapping.get(return_type, 'getAsString')
+        template = template.replace('return response.get("data").getAsInt();', f'return response.get("data").{getter_method}();')
+
+        return template
+
+    def _generate_rust_code(self, function_name: str, arguments: dict, return_type: str) -> str:
+        """Generate Rust code by adapting the template."""
+        rust_template_path = os.path.join(self.project_root_path, 'utils', 'rust', 'main.rs')
+        template = self._read_template(rust_template_path)
+        if not template:
+            return ""
+
+        # Replace function name occurrences
+        template = template.replace('hash', function_name)
+
+        # Replace response data type
+        rust_return_type = self._java_to_rust_type(return_type)
+        template = template.replace('data: Option<i32>', f'data: Option<{rust_return_type}>')
+
+        return template
+
+    def _run(self, function_name: str, arguments: dict, return_type: str) -> str:
+        """
+        Generate adapted Java and Rust code for function linking.
+        
+        Args:
+            function_name: Name of the function to link
+            arguments: Dictionary of argument names and their Java types
+            return_type: Java return type of the function
+            
+        Returns:
+            String containing generated Java and Rust code
+        """
+        try:
+            # 1. Read java template and rust template
+            java_code = self._generate_java_code(function_name, arguments, return_type)
+            rust_code = self._generate_rust_code(function_name, arguments, return_type)
+            
+            if not java_code or not rust_code:
+                return "Failed to generate linking code. Check if template files exist."
+            
+            # 3. Return generated template results
+            result = f"""Generated Java-Rust Linking Code for function '{function_name}'
+
+Function Signature: {return_type} {function_name}({', '.join([f'{param_type} {param_name}' for param_name, param_type in arguments.items()])})
+
+=== JAVA CODE ===
+{java_code}
+
+=== RUST CODE ===
+{rust_code}
+
+=== MANUAL ADJUSTMENTS NEEDED ===
+For Java code:
+- Update parameter construction in the JSON request (lines 33-41)
+  Current template handles: seed (int) and input (byte[])
+  You need to adjust for your parameters: {', '.join([f'{param_name} ({param_type})' for param_name, param_type in arguments.items()])}
+
+For Rust code:
+- Update the Params struct (lines 13-16) to match your parameters
+- Update parameter extraction (lines 51-52)
+- Update function call (line 55)
+
+Additional step:
+- Implement the actual Rust function in lib.rs:
+  pub fn {function_name}({', '.join([f'{param_name}: {self._java_to_rust_type(param_type)}' for param_name, param_type in arguments.items()])}) -> {self._java_to_rust_type(return_type)} {{
+      // TODO: Implement the actual logic
+      todo!()
+  }}
+
+=== TEMPLATE NOTES ===
+- Java template provides working example for 'hash' function with (byte[], int) parameters
+- Rust template provides working example for 'hash' function with (Vec<u8>, i32) parameters
+- Adapt the marked sections in both templates according to your function signature"""
+            
+            return result
+            
+        except Exception as e:
+            logger.exception(f"Error generating Java-Rust linking code: {e}")
+            return f"Error generating Java-Rust linking code: {e}"
+
+    def _java_to_rust_type(self, java_type: str) -> str:
+        """Convert Java type to Rust type."""
+        type_mapping = {
+            'int': 'i32',
+            'Integer': 'i32',
+            'byte[]': 'Vec<u8>',
+            'String': 'String',
+            'boolean': 'bool',
+            'Boolean': 'bool',
+            'double': 'f64',
+            'Double': 'f64',
+            'float': 'f32',
+            'Float': 'f32',
+            'long': 'i64',
+            'Long': 'i64'
+        }
+        return type_mapping.get(java_type, 'String')

@@ -39,8 +39,6 @@ def run_transform_workflow(project_path: str, language: str, llm_config: LLMConf
         with open(java_main_file) as f:
             source_code = f.read
         
-        
-        
         created_tools = create_transform_tools(
             project_root_path=hash_subdir,
             language=language,
