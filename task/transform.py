@@ -10,6 +10,43 @@ from static.get_env import return_env # To get the project root for template
 from utils.maven_utils import get_java_pom_template
 # from build.language_tools import create_java_tools # No longer needed
 
+def get_transform_prompt(language, source_code):
+    return {
+        "messages": [
+            (
+                "user",
+f"""
+You are an expert polyglot software engineer specializing in high-fidelity, idiomatic code migration. Your mission is to perform a functional-equivalent translation of a specific Java function, ensuring the new implementation passes the same behavioral checks as the original.  You need to get a transformation template first.
+
+**## CONTEXT ##**
+
+*   **Source Language:** Java
+*   **Target Language:** Rust
+*   **Objective:** Translate the function `{source_code}` located in the source file into a functionally equivalent and idiomatic Rust implementation.
+*   **Source File Path:** `src/main/java/com/exmaple/project/SensitiveFun.java`
+*   **Target File Path:** `rust/src/lib.rs`
+    ```
+
+**## REQUIREMENTS ##**
+
+1.  **Functional Equivalence:** The Rust code must replicate the exact behavior, logic, and edge cases of the original Java function. The primary measure of success is its ability to pass the provided unit tests' logic.
+2.  **Idiomatic Rust Style:** You must adopt standard Rust patterns, including ownership/borrowing, `Result` and `Option` for error handling, iterators, and traits. Avoid direct, literal translations that lead to unidiomatic or unsafe code.
+3.  **Type Mapping:** Intelligently map Java types (e.g., `List`, `Map`, `String`, custom classes) to the most appropriate and performant Rust equivalents (e.g., `Vec`, `HashMap`, `String`, `struct`). All custom types in the Java code must be defined as Rust `struct`s or `enum`s.
+4.  **Dependency Management:** Based on Java `pom.xml` dependencies, identify and recommend the closest equivalent Rust crates. Provide an example of the `[dependencies]` section in `Cargo.toml`, which is necessary for compiling your generated code.
+5.  **Full Autonomy:** You must operate without requesting clarification or external resources. Make reasonable, professional decisions for any ambiguities based on the provided context.
+6.  **Code Completeness:** The generated Rust code for `Rust/src/lib.rs` must be a complete, compilable file, including all necessary `use` statements, `struct`/`enum` definitions, `impl` blocks, and the translated function itself.
+7.  **External Calls**: The Java code should be able to call the converted equivalent code via `main.rs`, main.rs is the server-side called in the template.
+
+**## DELIVERABLE ##**
+
+Your final output must be a single, complete Rust code block containing the full contents for the `Rust/src/lib.rs` file, followed by a `TOML` code block for the suggested `Cargo.toml` dependencies. Do not include any explanations, conversational text, or markdown formatting outside of these two code blocks.
+
+
+""",
+            )
+        ]
+    }
+
 def run_transform_workflow(project_path: str, language: str, llm_config: LLMConfig) -> None:
     logger.info("Starting the create test workflow.")
 
@@ -37,7 +74,7 @@ def run_transform_workflow(project_path: str, language: str, llm_config: LLMConf
         cargo_new(hash_subdir)
         java_main_file = os.path.join(hash_subdir, "src", "main", "java", "com", "example", "project","SensitiveFun.java")
         with open(java_main_file) as f:
-            source_code = f.read
+            source_code = f.read()
         
         created_tools = create_transform_tools(
             project_root_path=hash_subdir,
@@ -54,28 +91,7 @@ def run_transform_workflow(project_path: str, language: str, llm_config: LLMConf
         llm = LLModel.from_config(llm_config) # Instantiate LLModel
         agent_executor = llm.create_tool_react(created_tools, system_prompt)
 
-        #TODO Detailed prompt transform and as a IPC
-        initial_input = {"messages": [("user",f"""
-        Your mission is to translate the function '{source_code}' in {language} project as a functional equivalent Rust project, saving the new implementation to `rust/src/lib.rs`.
-        You must operate with complete autonomy, making all decisions based solely on the provided project context, without requesting clarification, additional information, or external resources.
-        
-        **Current File Structure:**
-        1. **{language} file**: `src`
-        2. **rust file**: `rust`
-
-        **Core Requirements:**
-        The body of the original Java function needs to be refactored into a relay function that uses stdin/stdout to forward its arguments to the Rust side. The main function on the Rust side will receive the arguments, call the equivalent function in lib.rs, and then return the result to Java.
-        You need to run Java unit tests and ensure the results remain unchanged after converting to remote calls.
-        
-        ## Technical Requirements
-        1.  **Communication Method**: Java and Rust will communicate via standard input (`stdin`) and standard output (`stdout`). Java will write parameters to the Rust process's `stdin` and read results from its `stdout`.
-        2.  **Data Protocol**: All communication must use a standardized **JSON** format to ensure robustness and scalability.
-            *   **Java to Rust (Request)**: Must be a JSON object containing `function_name` and `params` fields.
-            *   **Rust to Java (Response)**: Must be a JSON object containing a `status` field (`success` or `error`). It should include a `data` field on success and an `error_message` field on failure.
-        3.  **Rust Program**: Must be a standalone, executable binary. It should be implemented as a **generic dispatcher**, capable of calling different function logic based on the `function_name` in the request.
-        4.  **Java Program**: Must include a generic invocation method, and the original functions should be refact
-        """
-        )]}
+        initial_input = get_transform_prompt(language, source_code)
         
          # Run
         for chunk in agent_executor.stream(initial_input, config={"recursion_limit": 150}):

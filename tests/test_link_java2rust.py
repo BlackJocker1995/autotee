@@ -8,15 +8,15 @@ import os
 import pytest
 
 # Add the project root to Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from LLM.tools.language_tools import LinkJava2Rust
+from LLM.tools.language_tools import TemplateForTrans
 
 @pytest.fixture
 def tool():
     """Fixture to create an instance of the LinkJava2Rust tool."""
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    return LinkJava2Rust(project_root_path=project_root)
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    return TemplateForTrans(project_root_path=project_root)
 
 def test_add_function(tool):
     """Test code generation for a simple 'add' function with int parameters."""

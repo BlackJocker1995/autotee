@@ -6,7 +6,7 @@ from langchain_community.agent_toolkits import FileManagementToolkit
 
 from LLM.tools.cargo_tool import CargoCheckTool
 from LLM.tools.file_tool import ApplyDiffTool, ListProjectStructureTool
-from LLM.tools.language_tools import JacocCoverageTool, MavenExecuteUnitTestTool
+from LLM.tools.language_tools import JacocCoverageTool, TemplateForTrans, MavenExecuteUnitTestTool
 
 def create_transform_tools(project_root_path: str,  language:str) -> list[BaseTool]:
     """
@@ -26,7 +26,8 @@ def create_transform_tools(project_root_path: str,  language:str) -> list[BaseTo
         ListProjectStructureTool(project_root_path=project_root_path),
         ApplyDiffTool(project_root_path=project_root_path),
         MavenExecuteUnitTestTool(project_root_path=project_root_path, is_end_point=False),
-        CargoCheckTool(project_root_path=project_root_path)
+        CargoCheckTool(project_root_path=project_root_path),
+        TemplateForTrans(project_root_path=project_root_path)
     ]
     # Only modify the rust code
     rust_project_path = os.path.join(project_root_path)

@@ -5,6 +5,9 @@ from pathlib import Path
 import sys
 
 
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from static.code_match import ProgramCode, JavaCode, PythonCode, JAVA_LANGUAGE, PYTHON_LANGUAGE
 
 # Mock tree_sitter and its language bindings
@@ -153,15 +156,14 @@ class TestJavaCode(unittest.TestCase):
         result = self.java_code.match_leaf_block("dummy_path.java", "some code", MagicMock(), "python")
         self.assertEqual(result, [])
 
-    @unittest.skipIf(JAVA_LANGUAGE is None, "JAVA_LANGUAGE is not loaded, skipping JavaCode tests.")
     def test_match_leaf_block_java_no_calls(self):
         file_path = "test_java_file.java"
         code = """
         class MyClass {
-            public void methodA() {
+            public static void methodA() {
                 System.out.println("Hello");
             }
-            public void methodB() {
+            public static void methodB() {
                 int x = 10;
             }
         }
@@ -177,27 +179,26 @@ class TestJavaCode(unittest.TestCase):
 
         leaf_methods = java_code_instance.match_leaf_block(file_path, code, root_node, "java")
         self.assertEqual(len(leaf_methods), 2)
-        self.assertIn('public void methodA() {\n                System.out.println("Hello");\n            }', leaf_methods[0]['code'])
+        self.assertIn('public static void methodA() {\n                System.out.println("Hello");\n            }', leaf_methods[0]['code'])
         self.assertEqual(leaf_methods[0]['file_path'], file_path)
         self.assertEqual(leaf_methods[0]['start_line'], 3)
         self.assertEqual(leaf_methods[0]['end_line'], 5)
-        self.assertIn('public void methodB() {\n                int x = 10;\n            }', leaf_methods[1]['code'])
+        self.assertIn('public static void methodB() {\n                int x = 10;\n            }', leaf_methods[1]['code'])
         self.assertEqual(leaf_methods[1]['file_path'], file_path)
         self.assertEqual(leaf_methods[1]['start_line'], 6)
         self.assertEqual(leaf_methods[1]['end_line'], 8)
 
-    @unittest.skipIf(JAVA_LANGUAGE is None, "JAVA_LANGUAGE is not loaded, skipping JavaCode tests.")
     def test_match_leaf_block_java_with_calls(self):
         file_path = "test_java_file.java"
         code = """
         class MyClass {
-            public void methodA() {
+            public static void methodA() {
                 System.out.println("Hello");
             }
-            public void methodB() {
+            public static void methodB() {
                 methodA();
             }
-            public void methodC() {
+            public static void methodC() {
                 methodA();
                 System.out.println("World");
             }
@@ -213,23 +214,22 @@ class TestJavaCode(unittest.TestCase):
 
         leaf_methods = java_code_instance.match_leaf_block(file_path, code, root_node, "java")
         self.assertEqual(len(leaf_methods), 1)
-        self.assertIn('public void methodA() {\n                System.out.println("Hello");\n            }', leaf_methods[0]['code'])
+        self.assertIn('public static void methodA() {\n                System.out.println("Hello");\n            }', leaf_methods[0]['code'])
         self.assertEqual(leaf_methods[0]['file_path'], file_path)
         self.assertEqual(leaf_methods[0]['start_line'], 3)
         self.assertEqual(leaf_methods[0]['end_line'], 5)
 
-    @unittest.skipIf(JAVA_LANGUAGE is None, "JAVA_LANGUAGE is not loaded, skipping JavaCode tests.")
     def test_match_leaf_block_java_overloaded_methods(self):
         file_path = "test_java_file.java"
         code = """
         class MyClass {
-            public void methodA() {
+            public static void methodA() {
                 System.out.println("Hello");
             }
-            public void methodA(int x) {
+            public static void methodA(int x) {
                 methodA(); // Calls methodA()
             }
-            public void methodB() {
+            public static void methodB() {
                 methodA(1); // Calls methodA(int)
             }
         }
@@ -244,7 +244,7 @@ class TestJavaCode(unittest.TestCase):
 
         leaf_methods = java_code_instance.match_leaf_block(file_path, code, root_node, "java")
         self.assertEqual(len(leaf_methods), 1)
-        self.assertIn('public void methodA() {\n                System.out.println("Hello");\n            }', leaf_methods[0]['code'])
+        self.assertIn('public static void methodA() {\n                System.out.println("Hello");\n            }', leaf_methods[0]['code'])
         self.assertEqual(leaf_methods[0]['file_path'], file_path)
         self.assertEqual(leaf_methods[0]['start_line'], 3)
         self.assertEqual(leaf_methods[0]['end_line'], 5)
@@ -262,7 +262,6 @@ class TestPythonCode(unittest.TestCase):
         result = self.python_code.match_leaf_block("dummy_path.py", "some code", MagicMock(), "java")
         self.assertEqual(result, [])
 
-    @unittest.skipIf(PYTHON_LANGUAGE is None, "PYTHON_LANGUAGE is not loaded, skipping PythonCode tests.")
     def test_match_leaf_block_python_no_calls(self):
         file_path = "test_python_file.py"
         code = """
@@ -291,7 +290,6 @@ def func_b():
         self.assertEqual(leaf_functions[1]['start_line'], 5)
         self.assertEqual(leaf_functions[1]['end_line'], 6)
 
-    @unittest.skipIf(PYTHON_LANGUAGE is None, "PYTHON_LANGUAGE is not loaded, skipping PythonCode tests.")
     def test_match_leaf_block_python_with_calls(self):
         file_path = "test_python_file.py"
         code = """
@@ -320,7 +318,6 @@ def func_c():
         self.assertEqual(leaf_functions[0]['start_line'], 2)
         self.assertEqual(leaf_functions[0]['end_line'], 3)
 
-    @unittest.skipIf(PYTHON_LANGUAGE is None, "PYTHON_LANGUAGE is not loaded, skipping PythonCode tests.")
     def test_match_leaf_block_python_method_calls(self):
         file_path = "test_python_file.py"
         code = """

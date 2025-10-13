@@ -184,23 +184,24 @@ class JacocCoverageTool(BaseTool):
              return f"An unexpected error occurred during Java unit test execution: {e}"
 
 
-class LinkJava2Rust(BaseTool):
+class TemplateForTrans(BaseTool):
     model_config = ConfigDict(extra='allow') # Allow extra fields for Jinja2 environments
-    name: str = "link_java2rust"
+    name: str = "create_template_for_transformation"
     description: str = '''
-    A tool for linking Java functions to Rust implementations to check test input consistency.
-    This tool reads Java and Rust templates and adapts them for different function signatures.
+    Generates Java and Rust code templates to link functions, facilitating communication between the two languages.
+    This tool adapts existing Java and Rust templates based on a given function signature (function name, Java arguments, and Java return type).
     '''
     
     project_root_path: str
     
     def __init__(self, project_root_path: str, **kwargs):
         super().__init__(project_root_path = project_root_path, **kwargs)
-        self.java_template_dir = os.path.join(project_root_path, 'utils', 'java')
-        self.rust_template_dir = os.path.join(project_root_path, 'utils', 'rust')
+        # The templates are in the workspace's utils directory, not the dynamic project_root_path
+        workspace_root = os.getcwd()
+        self.java_template_dir = os.path.join(workspace_root, 'utils', 'java')
+        self.rust_template_dir = os.path.join(workspace_root, 'utils', 'rust')
         self.java_env = Environment(loader=FileSystemLoader(self.java_template_dir))
         self.rust_env = Environment(loader=FileSystemLoader(self.rust_template_dir))
-        self.rust_env.filters['java_to_rust_type'] = self._java_to_rust_type
 
     def _generate_java_code(self, function_name: str, arguments: dict, return_type: str) -> str:
         """Generate Java code by adapting the template using Jinja2."""
@@ -209,16 +210,7 @@ class LinkJava2Rust(BaseTool):
             
             signature_params = [f"{param_type} {param_name}" for param_name, param_type in arguments.items()]
             
-            return_type_mapping = {
-                'int': 'getAsInt',
-                'String': 'getAsString',
-                'boolean': 'getAsBoolean',
-                'double': 'getAsDouble',
-                'float': 'getAsFloat',
-                'long': 'getAsLong'
-            }
-            getter_method = return_type_mapping.get(return_type, 'getAsString')
-
+            getter_method = self._get_gson_getter_method(return_type)
             return template.render(
                 function_name=function_name,
                 arguments=arguments,
@@ -230,16 +222,22 @@ class LinkJava2Rust(BaseTool):
             logger.error(f"Failed to generate Java code with Jinja2: {e}")
             return ""
 
-    def _generate_rust_code(self, function_name: str, arguments: dict, return_type: str) -> str:
-        """Generate Rust code by adapting the template using Jinja2."""
+    def _generate_rust_code(self, function_name: str, rust_arguments: dict, rust_return_type: str) -> str:
+        """
+        Generate Rust code by adapting the template using Jinja2.
+        
+        Args:
+            function_name: Name of the function to link
+            rust_arguments: Dictionary of argument names and their Rust types
+            rust_return_type: Rust return type of the function
+        """
         try:
             template = self.rust_env.get_template('main.rs')
             
             return template.render(
                 function_name=function_name,
-                arguments=arguments,
-                return_type=return_type,
-                rust_return_type=self._java_to_rust_type(return_type) # Pass directly
+                arguments=rust_arguments,
+                return_type=rust_return_type
             )
         except Exception as e:
             logger.error(f"Failed to generate Rust code with Jinja2: {e}")
@@ -260,57 +258,68 @@ class LinkJava2Rust(BaseTool):
         try:
             # 1. Read java template and rust template
             java_code = self._generate_java_code(function_name, arguments, return_type)
-            rust_code = self._generate_rust_code(function_name, arguments, return_type)
+
+            # Convert Java types to Rust types for the Rust template
+            rust_arguments = {name: self._java_to_rust_type(j_type) for name, j_type in arguments.items()}
+            rust_return_type = self._java_to_rust_type(return_type)
+            rust_code = self._generate_rust_code(function_name, rust_arguments, rust_return_type)
             
             if not java_code or not rust_code:
                 return "Failed to generate linking code. Check if template files exist."
+
+            # 1. Write Rust code to the appropriate file
+            rust_main_path = os.path.join(self.project_root_path, 'rust', 'src', 'main.rs')
+            file_utils.write_file(rust_main_path, rust_code)
             
+            cargo_template_path = os.path.join(os.getcwd(), 'utils', 'rust', 'Cargo.toml')
+            cargo_content = file_utils.read_file(cargo_template_path)
+            rust_cargo_path = os.path.join(self.project_root_path, 'rust', 'Cargo.toml')
+            file_utils.write_file(rust_cargo_path, cargo_content)
+            
+            # 2. Backup SensitiveFun.java to BKSensitiveFun.java and Replace the Java code
+            java_main_file = os.path.join(self.project_root_path, "src", "main", "java", "com", "example", "project", "SensitiveFun.java")
+            
+            # Backup the original file
+            if os.path.exists(java_main_file):
+                backup_file = os.path.join(self.project_root_path, "src", "main", "java", "com", "example", "project", "BKSensitiveFun.java")
+                shutil.copy2(java_main_file, backup_file) # copy2 preserves metadata
+                logger.info(f"Backed up {java_main_file} to {backup_file}")
+
+            file_utils.write_file(java_main_file, java_code)
+
             # 3. Return generated template results
-            result = f"""Generated Java-Rust Linking Code for function '{function_name}'
+            result = f"Generated Java-Rust Linking Code for function '{function_name}"
 
-Function Signature: {return_type} {function_name}({', '.join([f'{param_type} {param_name}' for param_name, param_type in arguments.items()])})
-
-=== JAVA CODE ===
-{java_code}
-
-=== RUST CODE ===
-{rust_code}
-
-=== MANUAL ADJUSTMENTS NEEDED ===
-For Java code:
-- Update parameter construction in the JSON request (lines 33-41)
-  Current template handles: seed (int) and input (byte[])
-  You need to adjust for your parameters: {', '.join([f'{param_name} ({param_type})' for param_name, param_type in arguments.items()])}
-
-For Rust code:
-- Update the Params struct (lines 13-16) to match your parameters
-- Update parameter extraction (lines 51-52)
-- Update function call (line 55)
-
-Additional step:
-- Implement the actual Rust function in lib.rs:
-  pub fn {function_name}({', '.join([f'{param_name}: {self._java_to_rust_type(param_type)}' for param_name, param_type in arguments.items()])}) -> {self._java_to_rust_type(return_type)} {{
-      // TODO: Implement the actual logic
-      todo!()
-  }}
-
-=== TEMPLATE NOTES ===
-- Java template provides working example for 'hash' function with (byte[], int) parameters
-- Rust template provides working example for 'hash' function with (Vec<u8>, i32) parameters
-- Adapt the marked sections in both templates according to your function signature"""
-            
             return result
             
         except Exception as e:
             logger.exception(f"Error generating Java-Rust linking code: {e}")
             return f"Error generating Java-Rust linking code: {e}"
 
+    def _get_gson_getter_method(self, java_type: str) -> str:
+        """Get the appropriate Gson getter method for a given Java type."""
+        getter_mapping = {
+            'int': 'getAsInt',
+            'Integer': 'getAsInt',
+            'long': 'getAsLong',
+            'Long': 'getAsLong',
+            'double': 'getAsDouble',
+            'Double': 'getAsDouble',
+            'float': 'getAsFloat',
+            'Float': 'getAsFloat',
+            'boolean': 'getAsBoolean',
+            'Boolean': 'getAsBoolean',
+            'String': 'getAsString'
+        }
+        # Default to getAsString for complex types that will be deserialized from JSON string
+        return getter_mapping.get(java_type, 'getAsString')
+
     def _java_to_rust_type(self, java_type: str) -> str:
         """Convert Java type to Rust type."""
         type_mapping = {
             'int': 'i32',
             'Integer': 'i32',
-            'byte[]': 'Vec<u8>',
+            'byte[]': 'Vec<i8>',
             'String': 'String',
             'boolean': 'bool',
             'Boolean': 'bool',

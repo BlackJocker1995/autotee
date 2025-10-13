@@ -483,7 +483,7 @@ class RustDynamic(CodeDynamic):
             output = output[marker_index + len(marker):]
 
         if "Finished `dev` profile" in output and "warning:" not in output:
-            return "Check pass. The project is executable."
+            return "Check pass. The rust project is executable."
         else:
             return output
 

@@ -177,7 +177,7 @@ def create_convert_tools(original_project_path: str, rust_project_path: str, lan
                 #logger.debug(f"Cargo check completed with warnings:\n{output}")
                 return output
             #logger.debug("Cargo check passed without errors or warnings.")
-            return "Check pass. The project is executable."
+            return "Check pass. The rust project is executable."
         else:
             #logger.debug(f"Cargo check did not finish cleanly:\n{output}")
             return output

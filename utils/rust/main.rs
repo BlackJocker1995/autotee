@@ -11,14 +11,14 @@ struct Request {
 #[derive(Serialize, Deserialize)]
 struct Params {
     {% for param_name, param_type in arguments.items() %}
-    {{ param_name }}: {{ param_type | java_to_rust_type }},
+    {{ param_name }}: {{ param_type }},
     {% endfor %}
 }
 
 #[derive(Serialize, Deserialize)]
 struct Response {
     status: String,
-    data: Option<{{ rust_return_type }}>,
+    data: Option<{{ return_type }}>,
     error_message: Option<String>,
 }
 
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("Failed to parse parameters: {}", e))?;
 
     // Call the function from lib.rs
-    let result = rust::{{ function_name }}({% for param_name, param_type in arguments.items() %}params.{{ param_name }}{% if not loop.last %}, {% endif %}{% endfor %});
+    let result = rust::{{ function_name }}({% for param_name, param_type in arguments.items() %}{% if param_type == 'Vec<i8>' %}&{% endif %}params.{{ param_name }}{% if not loop.last %}, {% endif %}{% endfor %});
 
     // Create and output JSON response
     let response = Response {

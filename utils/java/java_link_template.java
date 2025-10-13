@@ -31,8 +31,7 @@ public class SensitiveFun {
             {% elif param_type in ['int', 'Integer', 'long', 'Long', 'double', 'Double', 'float', 'Float', 'boolean', 'Boolean', 'String'] %}
             params.addProperty("{{ param_name }}", {{ param_name }});
             {% else %}
-            // TODO: Unsupported type for automatic serialization: {{ param_type }}. Please add manually.
-            // Example: params.add("{{ param_name }}", gson.toJsonTree({{ param_name }}));
+            params.add("{{ param_name }}", gson.toJsonTree({{ param_name }}));
             {% endif %}
             {% endfor %}
             request.add("params", params);  
