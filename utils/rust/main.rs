@@ -1,29 +1,26 @@
 use std::io::{self, Read};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Serialize, Deserialize)]
 struct Request {
     function_name: String,
-    params: Params,
+    params: Value, // Use Value to handle dynamic parameters
 }
 
-// flag ----------- start change -------------
-// Param 1
 #[derive(Serialize, Deserialize)]
 struct Params {
-    seed: i32,
-    input: Vec<u8>,
+    {% for param_name, param_type in arguments.items() %}
+    {{ param_name }}: {{ param_type | java_to_rust_type }},
+    {% endfor %}
 }
 
-// Param2
 #[derive(Serialize, Deserialize)]
 struct Response {
     status: String,
-    data: Option<i32>,
+    data: Option<{{ rust_return_type }}>,
     error_message: Option<String>,
 }
-// flag ----------- end change -------------
-
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Read all input from stdin
@@ -34,9 +31,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request: Request = serde_json::from_str(&input)
         .map_err(|e| format!("Failed to parse JSON request: {}", e))?;
 
-    // Validate function name, 
-    // TODO: need to change the name
-    if request.function_name != "hash" {
+    // Validate function name
+    if request.function_name != "{{ function_name }}" {
         let response = Response {
             status: "error".to_string(),
             data: None,
@@ -47,12 +43,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Extract parameters
-    // TODO: need to change the params. I think it can use a itertive method to get each parameters.
-    let seed = request.params.seed;
-    let input_bytes = request.params.input;
+    let params: Params = serde_json::from_value(request.params)
+        .map_err(|e| format!("Failed to parse parameters: {}", e))?;
 
-    // Call the hash function from lib.rs
-    let result = rust::hash(&input_bytes, seed);
+    // Call the function from lib.rs
+    let result = rust::{{ function_name }}({% for param_name, param_type in arguments.items() %}params.{{ param_name }}{% if not loop.last %}, {% endif %}{% endfor %});
 
     // Create and output JSON response
     let response = Response {

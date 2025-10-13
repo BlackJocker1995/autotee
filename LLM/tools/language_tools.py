@@ -7,10 +7,11 @@ from loguru import logger
 from typing import Dict, List, Callable, Any, Optional, Union
 from langchain.tools import tool
 import subprocess # Replace pexpect with subprocess
+from jinja2 import Environment, FileSystemLoader
 from analyzers.jacoco.jacoco_analyzer import JacocoAnalyzer
 from utils import file_utils
 import xml.etree.ElementTree as ET
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from langchain_core.tools import BaseTool
 
 
@@ -184,6 +185,7 @@ class JacocCoverageTool(BaseTool):
 
 
 class LinkJava2Rust(BaseTool):
+    model_config = ConfigDict(extra='allow') # Allow extra fields for Jinja2 environments
     name: str = "link_java2rust"
     description: str = '''
     A tool for linking Java functions to Rust implementations to check test input consistency.
@@ -194,63 +196,54 @@ class LinkJava2Rust(BaseTool):
     
     def __init__(self, project_root_path: str, **kwargs):
         super().__init__(project_root_path = project_root_path, **kwargs)
-
-    def _read_template(self, template_path: str) -> str:
-        """Read template file content."""
-        try:
-            with open(template_path, 'r', encoding='utf-8') as f:
-                return f.read()
-        except Exception as e:
-            logger.error(f"Failed to read template {template_path}: {e}")
-            return ""
+        self.java_template_dir = os.path.join(project_root_path, 'utils', 'java')
+        self.rust_template_dir = os.path.join(project_root_path, 'utils', 'rust')
+        self.java_env = Environment(loader=FileSystemLoader(self.java_template_dir))
+        self.rust_env = Environment(loader=FileSystemLoader(self.rust_template_dir))
+        self.rust_env.filters['java_to_rust_type'] = self._java_to_rust_type
 
     def _generate_java_code(self, function_name: str, arguments: dict, return_type: str) -> str:
-        """Generate Java code by adapting the template."""
-        java_template_path = os.path.join(self.project_root_path, 'utils', 'java', 'java_link_template.java')
-        template = self._read_template(java_template_path)
-        if not template:
+        """Generate Java code by adapting the template using Jinja2."""
+        try:
+            template = self.java_env.get_template('java_link_template.java')
+            
+            signature_params = [f"{param_type} {param_name}" for param_name, param_type in arguments.items()]
+            
+            return_type_mapping = {
+                'int': 'getAsInt',
+                'String': 'getAsString',
+                'boolean': 'getAsBoolean',
+                'double': 'getAsDouble',
+                'float': 'getAsFloat',
+                'long': 'getAsLong'
+            }
+            getter_method = return_type_mapping.get(return_type, 'getAsString')
+
+            return template.render(
+                function_name=function_name,
+                arguments=arguments,
+                return_type=return_type,
+                signature_params=', '.join(signature_params),
+                getter_method=getter_method
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate Java code with Jinja2: {e}")
             return ""
-
-        # Replace function name occurrences
-        template = template.replace('hash', function_name)
-        
-        # Replace function signature
-        signature_params = []
-        for param_name, param_type in arguments.items():
-            signature_params.append(f"{param_type} {param_name}")
-        new_signature = f"public static {return_type} {function_name}({', '.join(signature_params)})"
-        template = template.replace('public static int hash(byte[] input, int seed)', new_signature)
-
-        # Replace return type handling using mapping
-        return_type_mapping = {
-            'int': 'getAsInt',
-            'String': 'getAsString',
-            'boolean': 'getAsBoolean',
-            'double': 'getAsDouble',
-            'float': 'getAsFloat',
-            'long': 'getAsLong'
-        }
-        
-        getter_method = return_type_mapping.get(return_type, 'getAsString')
-        template = template.replace('return response.get("data").getAsInt();', f'return response.get("data").{getter_method}();')
-
-        return template
 
     def _generate_rust_code(self, function_name: str, arguments: dict, return_type: str) -> str:
-        """Generate Rust code by adapting the template."""
-        rust_template_path = os.path.join(self.project_root_path, 'utils', 'rust', 'main.rs')
-        template = self._read_template(rust_template_path)
-        if not template:
+        """Generate Rust code by adapting the template using Jinja2."""
+        try:
+            template = self.rust_env.get_template('main.rs')
+            
+            return template.render(
+                function_name=function_name,
+                arguments=arguments,
+                return_type=return_type,
+                rust_return_type=self._java_to_rust_type(return_type) # Pass directly
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate Rust code with Jinja2: {e}")
             return ""
-
-        # Replace function name occurrences
-        template = template.replace('hash', function_name)
-
-        # Replace response data type
-        rust_return_type = self._java_to_rust_type(return_type)
-        template = template.replace('data: Option<i32>', f'data: Option<{rust_return_type}>')
-
-        return template
 
     def _run(self, function_name: str, arguments: dict, return_type: str) -> str:
         """

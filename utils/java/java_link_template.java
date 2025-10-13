@@ -9,14 +9,7 @@ import com.google.gson.JsonArray;
 public class SensitiveFun {
     private static final Gson gson = new Gson();
  
-    public static int hash(byte[] input, int seed) {// need change signature to match the name and arguments.
-        // Temp start...
-
-        
-        if (input == null) {
-            return 0;
-        }
-        
+    public static {{ return_type }} {{ function_name }}({{ signature_params }}) {
         try {
             String[] cmd = {"cargo", "run", "--bin", "rust_main", "--manifest-path", "rust/Cargo.toml", "--quiet"};
             ProcessBuilder pb = new ProcessBuilder(cmd);
@@ -25,22 +18,24 @@ public class SensitiveFun {
             Process process = pb.start();
             JsonObject request = new JsonObject();
             
-            // flag --------- start change -----------
-            // TODO: Change to real function name
-            request.addProperty("function_name", "hash");
+            request.addProperty("function_name", "{{ function_name }}");
 
-            // create parameter for argument.
             JsonObject params = new JsonObject();
-            params.addProperty("seed", seed);
-            
-            // create parameter fpr argument.
-            JsonArray byteArrayNode = new JsonArray();
-            for (byte b : input) {
-                byteArrayNode.add(b & 0xFF); // Convert byte to unsigned int
+            {% for param_name, param_type in arguments.items() %}
+            {% if param_type == 'byte[]' %}
+            JsonArray {{ param_name }}Array = new JsonArray();
+            for (byte b : {{ param_name }}) {
+                {{ param_name }}Array.add(b & 0xFF);
             }
-            params.add("input", byteArrayNode);
+            params.add("{{ param_name }}", {{ param_name }}Array);
+            {% elif param_type in ['int', 'Integer', 'long', 'Long', 'double', 'Double', 'float', 'Float', 'boolean', 'Boolean', 'String'] %}
+            params.addProperty("{{ param_name }}", {{ param_name }});
+            {% else %}
+            // TODO: Unsupported type for automatic serialization: {{ param_type }}. Please add manually.
+            // Example: params.add("{{ param_name }}", gson.toJsonTree({{ param_name }}));
+            {% endif %}
+            {% endfor %}
             request.add("params", params);  
-            // flag --------- end change -----------
 
             // Send JSON request to Rust binary
             String jsonRequest = gson.toJson(request);
@@ -69,11 +64,10 @@ public class SensitiveFun {
                 throw new RuntimeException("Rust process failed with exit code: " + exitCode);
             }
             
-            // TODO: need to change. It may be other types.
-            return response.get("data").getAsInt();
+            return response.get("data").{{ getter_method }}();
             
         } catch (Exception e) {
-            throw new RuntimeException("Failed to call Rust hash function", e);
+            throw new RuntimeException("Failed to call Rust {{ function_name }} function", e);
         }
     }
 }
