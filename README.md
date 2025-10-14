@@ -12,23 +12,49 @@ In this project, we introduce AutoTEE, an automated approach that adapts existin
 - **Functional Consistency**: Ensures functional consistency through test cases and iterative refinement.
 - **Seamless Integration**: Further code alteration and merging to integrate the transformed code with the original program, achieving automatic TEE protection.
 
-## Evaluation
+## Deployment
 
-AutoTEE has been evaluated on practical TEEs, with the support of advanced LLMs, achieving success rates exceeding 80%.
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/yourusername/autotee.git
+   cd autotee
+   ```
 
-## Getting Started
+2. **Create and activate a virtual environment**:
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
 
-To get started with AutoTEE, follow these steps:
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-1. Clone the repository:
-    ```bash
-    git clone https://github.com/yourusername/autotee.git
-    ```
-2. Navigate to the project directory:
-    ```bash
-    cd autotee
-    ```
-3. Install the required dependencies:
-    ```bash
-    pip install -r requirements.txt
-    ```
+## Usage
+
+The main entry point for the program is `main.py`. You can execute different functions by specifying the task name in the command line.
+
+**Important:** Before running, you must manually edit the `main.py` file to set the `project_name` variable to the absolute path of the project you wish to analyze.
+
+```python
+# In main.py
+project_name = "/path/to/your/project"
+```
+
+**Command format**:
+```bash
+python main.py <task>
+```
+
+**Available tasks**:
+- `leaf`: Run the processing task.
+- `sensitive`: Query for sensitive parts of the project.
+- `write`: Write sensitive information to a file.
+- `test`: Run the test creation workflow.
+- `transform`: Run the code transformation workflow.
+
+**Example**:
+```bash
+python main.py transform
+```
