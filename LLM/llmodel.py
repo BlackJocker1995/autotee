@@ -1,3 +1,4 @@
+from abc import ABC
 from json import tool
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -11,14 +12,9 @@ from langchain_deepseek import ChatDeepSeek
 from langgraph.prebuilt import create_react_agent
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
-from pydantic import SecretStr
-from langchain_core.prompts import PromptTemplate
-from abc import ABC, abstractmethod
-from langchain_core.prompts import HumanMessagePromptTemplate
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import SystemMessage
 from langchain_community.chat_models.tongyi import ChatTongyi
 from langchain_ollama import ChatOllama
-from langchain_community.llms.vllm import VLLMOpenAI
 
 
 class LLMConfig(BaseSettings):
@@ -29,7 +25,7 @@ class LLMConfig(BaseSettings):
     token_file: str = "tokenfile"
     request_timeout: int = 300
     max_tokens: int = 4096
-    max_retries: int = 4
+    #max_retries: int = 4
     system_prompt: str = ""
 
     def get_description(self) -> str:
@@ -109,7 +105,7 @@ class LLModel(ABC):
         self.llm = chat_model_class(
             model=config.model,
             request_timeout=config.request_timeout,
-            max_retries=config.max_retries,
+            #max_retries=config.max_retries,
             max_tokens = config.max_tokens,
             api_key=api_key,
             base_url=config.base_url if config.base_url else None

@@ -203,7 +203,7 @@ class TemplateForTrans(BaseTool):
         self.java_env = Environment(loader=FileSystemLoader(self.java_template_dir))
         self.rust_env = Environment(loader=FileSystemLoader(self.rust_template_dir))
 
-    def _generate_java_code(self, function_name: str, arguments: dict, return_type: str) -> str:
+    def _generate_java_code(self, function_name: str, snake_case_function_name: str, arguments: dict, return_type: str) -> str:
         """Generate Java code by adapting the template using Jinja2."""
         try:
             template = self.java_env.get_template('java_link_template.java')
@@ -213,6 +213,7 @@ class TemplateForTrans(BaseTool):
             getter_method = self._get_gson_getter_method(return_type)
             return template.render(
                 function_name=function_name,
+                snake_case_function_name=snake_case_function_name,
                 arguments=arguments,
                 return_type=return_type,
                 signature_params=', '.join(signature_params),
@@ -256,13 +257,17 @@ class TemplateForTrans(BaseTool):
             String containing generated Java and Rust code
         """
         try:
+            # Standardize function name to snake_case for Rust
+            snake_case_function_name = self._to_snake_case(function_name)
+
             # 1. Read java template and rust template
-            java_code = self._generate_java_code(function_name, arguments, return_type)
+            # Java side can keep the original name, but Rust side needs snake_case
+            java_code = self._generate_java_code(function_name, snake_case_function_name, arguments, return_type)
 
             # Convert Java types to Rust types for the Rust template
             rust_arguments = {name: self._java_to_rust_type(j_type) for name, j_type in arguments.items()}
             rust_return_type = self._java_to_rust_type(return_type)
-            rust_code = self._generate_rust_code(function_name, rust_arguments, rust_return_type)
+            rust_code = self._generate_rust_code(snake_case_function_name, rust_arguments, rust_return_type)
             
             if not java_code or not rust_code:
                 return "Failed to generate linking code. Check if template files exist."
@@ -279,12 +284,6 @@ class TemplateForTrans(BaseTool):
             # 2. Backup SensitiveFun.java to BKSensitiveFun.java and Replace the Java code
             java_main_file = os.path.join(self.project_root_path, "src", "main", "java", "com", "example", "project", "SensitiveFun.java")
             
-            # Backup the original file
-            if os.path.exists(java_main_file):
-                backup_file = os.path.join(self.project_root_path, "src", "main", "java", "com", "example", "project", "BKSensitiveFun.java")
-                shutil.copy2(java_main_file, backup_file) # copy2 preserves metadata
-                logger.info(f"Backed up {java_main_file} to {backup_file}")
-
             file_utils.write_file(java_main_file, java_code)
 
             # 3. Return generated template results
@@ -295,6 +294,11 @@ class TemplateForTrans(BaseTool):
         except Exception as e:
             logger.exception(f"Error generating Java-Rust linking code: {e}")
             return f"Error generating Java-Rust linking code: {e}"
+
+    def _to_snake_case(self, name: str) -> str:
+        """Convert a string from camelCase to snake_case."""
+        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+        return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
     def _get_gson_getter_method(self, java_type: str) -> str:
         """Get the appropriate Gson getter method for a given Java type."""
@@ -319,7 +323,7 @@ class TemplateForTrans(BaseTool):
         type_mapping = {
             'int': 'i32',
             'Integer': 'i32',
-            'byte[]': 'Vec<i8>',
+            'byte[]': 'Vec<u8>',
             'String': 'String',
             'boolean': 'bool',
             'Boolean': 'bool',

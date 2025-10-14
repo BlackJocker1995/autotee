@@ -39,6 +39,15 @@ def create_transform_tools(project_root_path: str,  language:str) -> list[BaseTo
     tools.extend(root_tools)
     return tools
 
+def create_template_tools(project_root_path: str,  language:str) -> list[BaseTool]:
+    """
+    """
+    tools = [
+        TemplateForTrans(project_root_path=project_root_path),
+    ]
+    return tools # type: ignore
+
+
 def create_test_gen_tools(project_root_path: str,  language:str) -> list[BaseTool]:
     """
     Factory function to create common project tools, including file management rooted at project_path.

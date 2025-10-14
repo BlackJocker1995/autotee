@@ -11,14 +11,33 @@ public class SensitiveFun {
  
     public static {{ return_type }} {{ function_name }}({{ signature_params }}) {
         try {
-            String[] cmd = {"cargo", "run", "--bin", "rust", "--manifest-path", "rust/Cargo.toml", "--quiet"};
+            {% for param_name, param_type in arguments.items() %}
+            {% if param_type == 'byte[]' %}
+            if ({{ param_name }} == null) {
+                {% if return_type == 'void' %}
+                return;
+                {% elif return_type == 'byte[]' %}
+                return new byte[0];
+                {% elif return_type in ['int', 'Integer', 'long', 'Long', 'short', 'Short', 'byte', 'Byte'] %}
+                return 0;
+                {% elif return_type in ['double', 'Double', 'float', 'Float'] %}
+                return 0.0;
+                {% elif return_type in ['boolean', 'Boolean'] %}
+                return false;
+                {% else %}
+                return null;
+                {% endif %}
+            }
+            {% endif %}
+            {% endfor %}
+            String[] cmd = {"cargo", "run", "--quiet"};
             ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.directory(new File("."));
+            pb.directory(new File("rust"));
             pb.redirectErrorStream(true);
             Process process = pb.start();
             JsonObject request = new JsonObject();
             
-            request.addProperty("function_name", "{{ function_name }}");
+            request.addProperty("function_name", "{{ snake_case_function_name }}");
 
             JsonObject params = new JsonObject();
             {% for param_name, param_type in arguments.items() %}
@@ -63,7 +82,16 @@ public class SensitiveFun {
                 throw new RuntimeException("Rust process failed with exit code: " + exitCode);
             }
             
+            {% if return_type == 'byte[]' %}
+            JsonArray dataArray = response.get("data").getAsJsonArray();
+            byte[] data = new byte[dataArray.size()];
+            for (int i = 0; i < dataArray.size(); i++) {
+                data[i] = dataArray.get(i).getAsByte();
+            }
+            return data;
+            {% else %}
             return response.get("data").{{ getter_method }}();
+            {% endif %}
             
         } catch (Exception e) {
             throw new RuntimeException("Failed to call Rust {{ function_name }} function", e);

@@ -16,26 +16,26 @@ def get_transform_prompt(language, source_code):
             (
                 "user",
 f"""
-You are an expert polyglot software engineer specializing in high-fidelity, idiomatic code migration. Your mission is to perform a functional-equivalent translation of a specific Java function, ensuring the new implementation passes the same behavioral checks as the original.  You need to get a transformation template first.
+You are an expert polyglot software engineer specializing in high-fidelity, idiomatic code migration. Your mission is to perform a functional-equivalent translation of a specific Java function, ensuring the new implementation passes the same behavioral checks as the original.
 
 **## CONTEXT ##**
-
-*   **Source Language:** Java
-*   **Target Language:** Rust
 *   **Objective:** Translate the function `{source_code}` located in the source file into a functionally equivalent and idiomatic Rust implementation.
 *   **Source File Path:** `src/main/java/com/exmaple/project/SensitiveFun.java`
 *   **Target File Path:** `rust/src/lib.rs`
     ```
 
+**## Process ##**
+1. Translate the `{language}` function's logic into a pure Rust function and write into `rust/src/lib.rs`.
+2. After every modification to `rust/src/lib.rs`, you must immediately run `cargo check` to validate the code and fix issues. Do not proceed to the next step until `cargo check` passes without errors.
+3. Once the core Rust logic is syntactically correct, call `create_template_for_transformation` exactly once. This tool generates the necessary `{language}`-to-Rust connection templates, correctly mapping the original function name on the `{language}` side to the `snake_case` name on the Rust side.
+4. Run `cargo check` again to ensure the newly generated connection code integrates correctly with your implementation.
+5. Use `execute_unit_test` to run the original `{language}` unit tests. They must pass to confirm the translation is functionally correct and the integration is successful. If an error occurs, try to fix it.
+
 **## REQUIREMENTS ##**
 
 1.  **Functional Equivalence:** The Rust code must replicate the exact behavior, logic, and edge cases of the original Java function. The primary measure of success is its ability to pass the provided unit tests' logic.
 2.  **Idiomatic Rust Style:** You must adopt standard Rust patterns, including ownership/borrowing, `Result` and `Option` for error handling, iterators, and traits. Avoid direct, literal translations that lead to unidiomatic or unsafe code.
-3.  **Type Mapping:** Intelligently map Java types (e.g., `List`, `Map`, `String`, custom classes) to the most appropriate and performant Rust equivalents (e.g., `Vec`, `HashMap`, `String`, `struct`). All custom types in the Java code must be defined as Rust `struct`s or `enum`s.
-4.  **Dependency Management:** Based on Java `pom.xml` dependencies, identify and recommend the closest equivalent Rust crates. Provide an example of the `[dependencies]` section in `Cargo.toml`, which is necessary for compiling your generated code.
-5.  **Full Autonomy:** You must operate without requesting clarification or external resources. Make reasonable, professional decisions for any ambiguities based on the provided context.
-6.  **Code Completeness:** The generated Rust code for `Rust/src/lib.rs` must be a complete, compilable file, including all necessary `use` statements, `struct`/`enum` definitions, `impl` blocks, and the translated function itself.
-7.  **External Calls**: The Java code should be able to call the converted equivalent code via `main.rs`, main.rs is the server-side called in the template.
+3.  **Code Completeness:** The generated Rust code for `Rust/src/lib.rs` must be a complete, compilable file, including all necessary `use` statements, `struct`/`enum` definitions, `impl` blocks, and the translated function itself.
 
 **## DELIVERABLE ##**
 
