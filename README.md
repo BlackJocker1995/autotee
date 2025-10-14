@@ -33,6 +33,28 @@ In this project, we introduce AutoTEE, an automated approach that adapts existin
    pip install -r requirements.txt
    ```
 
+## Configuration
+
+### LLM API Token
+
+To use LLM providers that require an API key (like OpenAI, Google, DeepSeek), you must create a file named `tokenfile` inside the `LLM/` directory.
+
+1.  **Create the file**:
+    ```bash
+    touch LLM/tokenfile
+    ```
+
+2.  **Add your token**:
+    The file must contain your API token in the following format, where the key is the uppercase name of the provider:
+    ```
+    PROVIDER=YOUR_API_KEY
+    ```
+
+    **Example for OpenAI**:
+    ```
+    OPENAI=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    ```
+
 ## Usage
 
 The main entry point for the program is `main.py`. You can execute different functions by specifying the task name in the command line.
@@ -60,3 +82,10 @@ python main.py <task>
 ```bash
 python main.py transform
 ```
+
+## Intel SGX Support
+
+### Test Environment
+- Ubuntu 22.04 - 5.15.0-117-generic, VM, Ali cloud Z8 (Support SGX HW);
+- Ubuntu 22.04, Intel I7-9700 (SGX1.0);
+
