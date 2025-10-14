@@ -1,7 +1,0 @@
-{
-    "question1": "This is the source code of the function. If it meets all the specified conditions, please respond with **Yes**; otherwise, respond with **No**. Conditions1: The input (if have) and output types are base types, such as String, int, or byte[].Conditions2: this code snippet use or implement any operation among {sensitive_keys}. Specifically, {sensitive_details}",
-    "question_sensitive_types": "Which specific subcategories type is it involve in? Choose from {sensitive_subcategories_list}. If no specific subcategories are involved, respond with 'notype'.",
-    "question4": "List the code statements that involved in {query}.",
-    "question2": "Does this code utilize the operation, or does it implement the operation? Only answer **utilize** or **implement**",
-    "question5": "Please provide a brief description of the operation."
-}
