@@ -1,5 +1,7 @@
 # AutoTEE
 
+**Version:** 2.0
+
 ## Overview
 
 Trusted Execution Environments (TEEs) provide a hardware-supported secure environment for programs, safeguarding sensitive data and operations (e.g., fingerprint verification and remote attestation) to ensure security and integrity of the running program. Despite widespread hardware support, programs that utilize TEEs to safeguard sensitive operations and data remain scarce due to the complexity of adaptation.
