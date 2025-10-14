@@ -11,7 +11,7 @@ public class SensitiveFun {
  
     public static {{ return_type }} {{ function_name }}({{ signature_params }}) {
         try {
-            String[] cmd = {"cargo", "run", "--bin", "rust_main", "--manifest-path", "rust/Cargo.toml", "--quiet"};
+            String[] cmd = {"cargo", "run", "--bin", "rust", "--manifest-path", "rust/Cargo.toml", "--quiet"};
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.directory(new File("."));
             pb.redirectErrorStream(true);
