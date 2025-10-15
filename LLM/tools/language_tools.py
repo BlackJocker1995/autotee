@@ -3,6 +3,7 @@ from pathlib import Path
 import re
 import os
 import shutil # Import shutil for directory removal
+import toml
 from loguru import logger
 from typing import Dict, List, Callable, Any, Optional, Union
 from langchain.tools import tool
@@ -37,18 +38,9 @@ class MavenExecuteUnitTestTool(BaseTool):
 
     def _extract_error_lines(self, output: str, project_path: str) -> str:
             """Extract meaningful error lines from Maven output, filtering out helper messages."""
-            invalid_phrases = [
-                "To see the full stack trace of the errors, re-run Maven with the -e switch.",
-                "Re-run Maven using the -X switch to enable full debug logging.",
-                "For more information about the errors and possible solutions, please read the following articles:",
-                "[Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException"
-            ]
-
             error_lines = []
             for line in output.splitlines():
-                if "[ERROR]" in line:
-                    if line.strip() == "[ERROR]" or any(phrase in line for phrase in invalid_phrases):
-                        continue
+                if "[ERROR]" in line or line.startswith("Caused by"):
                     cleaned_line = line.replace(f"{project_path}/", "")
                     error_lines.append(cleaned_line)
 
@@ -144,7 +136,7 @@ class JacocCoverageTool(BaseTool):
         """
         try:
             # Construct and execute the Maven command to generate the JaCoCo report
-            command = f'mvn clean test jacoco:report'
+            command = f'mvn test jacoco:report'
             logger.debug(f"Executing command: {command} in {self.project_root_path}")
             try:
                 # Run the Maven command. If it times out, a TimeoutExpired exception will be caught.
@@ -183,6 +175,76 @@ class JacocCoverageTool(BaseTool):
              logger.exception(f"An unexpected error occurred during Java unit test execution")
              return f"An unexpected error occurred during Java unit test execution: {e}"
 
+class JavaCompileCheck(BaseTool):
+    name: str = "java_compile_check"
+    description: str = '''
+    Compiles a Java project using Maven and checks for compilation errors.
+    This tool runs the 'mvn compile' command and captures the output.
+    If compilation errors are found, it returns the specific error lines.
+    Otherwise, it returns a success message.
+    '''
+
+    project_root_path:str
+
+    def __init__(self, project_root_path: str, **kwargs):
+        super().__init__(project_root_path = project_root_path, **kwargs)
+
+    def _extract_error_lines(self, output: str, project_path: str) -> str:
+            """Extract meaningful error lines from Maven output, filtering out helper messages."""
+            invalid_phrases = [
+                "To see the full stack trace of the errors, re-run Maven with the -e switch.",
+                "Re-run Maven using the -X switch to enable full debug logging.",
+                "For more information about the errors and possible solutions, please read the following articles:",
+                "[Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException"
+            ]
+
+            error_lines = []
+            for line in output.splitlines():
+                if "[ERROR]" in line:
+                    if line.strip() == "[ERROR]" or any(phrase in line for phrase in invalid_phrases):
+                        continue
+                    cleaned_line = line.replace(f"{project_path}/", "")
+                    error_lines.append(cleaned_line)
+
+            return "\n".join(error_lines) if error_lines else ""
+
+    def _run(self) -> str:
+        command = "" # Initialize for exception handling
+        try:
+            command = f'mvn compile'
+            logger.debug(f"Executing command: {command} in {self.project_root_path}")
+
+            process = subprocess.run(command, cwd=self.project_root_path, capture_output=True, text=True, shell=True, timeout=300)
+            output = process.stdout + "\n" + process.stderr # Combine stdout and stderr
+            exit_status = process.returncode
+
+
+            if output:
+                ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+                cleaned_output = ansi_escape.sub('', output)
+
+                error_lines = self._extract_error_lines(cleaned_output, self.project_root_path)
+
+                if error_lines:
+                    return f"Java compilation failed with errors:\n{error_lines}"
+                elif exit_status != 0:
+                    return f"Java compilation failed with exit status {exit_status}. No specific errors found in output."
+                else:
+                    return "Java compilation successful."
+
+            elif exit_status != 0:
+                err_output = process.stderr.strip()
+                return f"Java compilation failed with exit status {exit_status}.{' Error output: ' + err_output if err_output else ' No error output.'}"
+            else:
+                return "Java compilation successful (no significant output captured)."
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Command '{command}' timed out after 300 seconds.")
+            return f"Error: Command '{command}' timed out."
+        except Exception as e:
+            logger.exception(f"An unexpected error occurred during Java compilation check")
+            return f"An unexpected error occurred during Java compilation check: {e}"
+
 
 class TemplateForTrans(BaseTool):
     model_config = ConfigDict(extra='allow') # Allow extra fields for Jinja2 environments
@@ -206,7 +268,7 @@ class TemplateForTrans(BaseTool):
     def _generate_java_code(self, function_name: str, snake_case_function_name: str, arguments: dict, return_type: str) -> str:
         """Generate Java code by adapting the template using Jinja2."""
         try:
-            template = self.java_env.get_template('java_link_template.java')
+            template = self.java_env.get_template('java_link_template.jinja')
             
             signature_params = [f"{param_type} {param_name}" for param_name, param_type in arguments.items()]
             
@@ -233,7 +295,7 @@ class TemplateForTrans(BaseTool):
             rust_return_type: Rust return type of the function
         """
         try:
-            template = self.rust_env.get_template('main.rs')
+            template = self.rust_env.get_template('main.jinja')
             
             return template.render(
                 function_name=function_name,
@@ -276,10 +338,7 @@ class TemplateForTrans(BaseTool):
             rust_main_path = os.path.join(self.project_root_path, 'rust', 'src', 'main.rs')
             file_utils.write_file(rust_main_path, rust_code)
             
-            cargo_template_path = os.path.join(os.getcwd(), 'utils', 'rust', 'Cargo.toml')
-            cargo_content = file_utils.read_file(cargo_template_path)
-            rust_cargo_path = os.path.join(self.project_root_path, 'rust', 'Cargo.toml')
-            file_utils.write_file(rust_cargo_path, cargo_content)
+            self._merge_cargo_toml()
             
             # 2. Backup SensitiveFun.java to BKSensitiveFun.java and Replace the Java code
             java_main_file = os.path.join(self.project_root_path, "src", "main", "java", "com", "example", "project", "SensitiveFun.java")
@@ -293,7 +352,36 @@ class TemplateForTrans(BaseTool):
             
         except Exception as e:
             logger.exception(f"Error generating Java-Rust linking code: {e}")
-            return f"Error generating Java-Rust linking code: {e}"
+            raise ValueError("Error generating Java-Rust linking code")
+
+    def _merge_cargo_toml(self):
+        """Merges dependencies from a template Cargo.toml into the project's Cargo.toml."""
+        cargo_template_path = os.path.join(os.getcwd(), 'utils', 'rust', 'Cargo.toml')
+        template_cargo_content = file_utils.read_file(cargo_template_path)
+        template_cargo = toml.loads(template_cargo_content)
+        
+        rust_cargo_path = os.path.join(self.project_root_path, 'rust', 'Cargo.toml')
+        
+        if os.path.exists(rust_cargo_path):
+            existing_cargo_content = file_utils.read_file(rust_cargo_path)
+            existing_cargo = toml.loads(existing_cargo_content)
+        else:
+            existing_cargo = toml.loads('') # Create an empty toml table
+
+        # Merge dependencies
+        if 'dependencies' in template_cargo:
+            if 'dependencies' not in existing_cargo:
+                existing_cargo['dependencies'] = {}
+            for dep, version in template_cargo['dependencies'].items():
+                if dep not in existing_cargo['dependencies']:
+                    existing_cargo['dependencies'][dep] = version
+        
+        # Ensure other sections from template are present if missing
+        for section in template_cargo:
+            if section != 'dependencies' and section not in existing_cargo:
+                existing_cargo[section] = template_cargo[section]
+
+        file_utils.write_file(rust_cargo_path, toml.dumps(existing_cargo))
 
     def _to_snake_case(self, name: str) -> str:
         """Convert a string from camelCase to snake_case."""

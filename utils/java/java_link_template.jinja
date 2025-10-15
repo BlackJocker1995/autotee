@@ -8,32 +8,30 @@ import com.google.gson.JsonArray;
  
 public class SensitiveFun {
     private static final Gson gson = new Gson();
+
+    // Define a private static class for the response structure
+    private static class Response {
+        String status;
+        {% if return_type == 'byte[]' %}
+        JsonArray data;
+        {% else %}
+        {{ return_type }} data;
+        {% endif %}
+        String error_message;
+    }
  
     public static {{ return_type }} {{ function_name }}({{ signature_params }}) {
         try {
             {% for param_name, param_type in arguments.items() %}
             {% if param_type == 'byte[]' %}
             if ({{ param_name }} == null) {
-                {% if return_type == 'void' %}
-                return;
-                {% elif return_type == 'byte[]' %}
-                return new byte[0];
-                {% elif return_type in ['int', 'Integer', 'long', 'Long', 'short', 'Short', 'byte', 'Byte'] %}
-                return 0;
-                {% elif return_type in ['double', 'Double', 'float', 'Float'] %}
-                return 0.0;
-                {% elif return_type in ['boolean', 'Boolean'] %}
-                return false;
-                {% else %}
-                return null;
-                {% endif %}
+                throw new Exception("Input byte array '{{ param_name }}' cannot be null");
             }
             {% endif %}
             {% endfor %}
             String[] cmd = {"cargo", "run", "--quiet"};
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.directory(new File("rust"));
-            pb.redirectErrorStream(true);
             Process process = pb.start();
             JsonObject request = new JsonObject();
             
@@ -53,7 +51,7 @@ public class SensitiveFun {
             params.add("{{ param_name }}", gson.toJsonTree({{ param_name }}));
             {% endif %}
             {% endfor %}
-            request.add("params", params);  
+            request.add("params", params);
 
             // Send JSON request to Rust binary
             String jsonRequest = gson.toJson(request);
@@ -71,9 +69,9 @@ public class SensitiveFun {
             is.close();
             
             // Parse the JSON response
-            JsonObject response = gson.fromJson(result.toString().trim(), JsonObject.class);
-            if ("error".equals(response.get("status").getAsString())) {
-                throw new RuntimeException("Rust function error: " + response.get("error_message").getAsString());
+            Response response = gson.fromJson(result.toString().trim(), Response.class);
+            if ("error".equals(response.status)) {
+                throw new RuntimeException("Rust function error: " + response.error_message);
             }
             
             // Wait for process to complete
@@ -83,14 +81,14 @@ public class SensitiveFun {
             }
             
             {% if return_type == 'byte[]' %}
-            JsonArray dataArray = response.get("data").getAsJsonArray();
+            JsonArray dataArray = response.data;
             byte[] data = new byte[dataArray.size()];
             for (int i = 0; i < dataArray.size(); i++) {
                 data[i] = dataArray.get(i).getAsByte();
             }
             return data;
             {% else %}
-            return response.get("data").{{ getter_method }}();
+            return response.data;
             {% endif %}
             
         } catch (Exception e) {

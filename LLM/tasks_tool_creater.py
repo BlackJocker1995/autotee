@@ -6,7 +6,7 @@ from langchain_community.agent_toolkits import FileManagementToolkit
 
 from LLM.tools.cargo_tool import CargoCheckTool
 from LLM.tools.file_tool import ApplyDiffTool, ListProjectStructureTool
-from LLM.tools.language_tools import JacocCoverageTool, TemplateForTrans, MavenExecuteUnitTestTool
+from LLM.tools.language_tools import JacocCoverageTool, JavaCompileCheck, TemplateForTrans, MavenExecuteUnitTestTool
 
 def create_transform_tools(project_root_path: str,  language:str) -> list[BaseTool]:
     """
@@ -66,6 +66,7 @@ def create_test_gen_tools(project_root_path: str,  language:str) -> list[BaseToo
         ListProjectStructureTool(project_root_path=project_root_path),
         ApplyDiffTool(project_root_path=project_root_path),
         JacocCoverageTool(project_root_path=project_root_path),
+        JavaCompileCheck(project_root_path=project_root_path),
         MavenExecuteUnitTestTool(project_root_path=project_root_path, is_end_point=False)
     ]
 

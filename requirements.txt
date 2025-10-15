@@ -20,3 +20,4 @@ tree-sitter
 tree-sitter-java
 tree-sitter-python
 unidiff
+toml

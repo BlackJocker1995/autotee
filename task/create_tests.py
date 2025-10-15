@@ -86,6 +86,7 @@ def run_create_test_workflow(project_path: str, language: str, llm_config: LLMCo
         Generate a diverse set of test inputs for  {language} project located at `{hash_subdir}`, aiming to maximize both line and branch coverage. 
         Enhance the unit test coverage (line and branch) for the specified code unit.
         Ensure generated tests are syntactically correct, invoke relevant methods with appropriate inputs, and include assertions to validate expected behavior.
+        If the added unit tests do not increase coverage, they will not be kept. The generated tests can only be assertEquals and assertThrows, and assertThrows can only be Exception.class
         
         **Completion Criteria:** You have successfully completed this task only when both of the following conditions are met:
         1. The task concludes after three consecutive attempts show no improvement in line and branch coverage.

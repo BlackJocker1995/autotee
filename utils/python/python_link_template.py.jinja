@@ -1,0 +1,57 @@
+import json
+import subprocess
+import os
+
+def {{ function_name }}({{ signature_params }}):
+    try:
+        # Type checking for byte array arguments
+        {% for param_name, param_type in arguments.items() %}
+        {% if param_type == 'bytes' %}
+        if not isinstance({{ param_name }}, bytes):
+            raise TypeError("Argument '{{ param_name }}' must be a byte array")
+        {% endif %}
+        {% endfor %}
+
+        cmd = ["cargo", "run", "--quiet"]
+        
+        # Ensure the rust directory exists
+        rust_dir = "rust"
+        if not os.path.isdir(rust_dir):
+            raise FileNotFoundError(f"The directory '{rust_dir}' does not exist.")
+
+        process = subprocess.Popen(cmd, cwd=rust_dir, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        params = {}
+        {% for param_name, param_type in arguments.items() %}
+        {% if param_type == 'bytes' %}
+        params["{{ param_name }}"] = list({{ param_name }})
+        {% else %}
+        params["{{ param_name }}"] = {{ param_name }}
+        {% endif %}
+        {% endfor %}
+
+        request = {
+            "function_name": "{{ snake_case_function_name }}",
+            "params": params
+        }
+
+        # Send JSON request to Rust binary
+        stdout, stderr = process.communicate(json.dumps(request))
+
+        if process.returncode != 0:
+            raise RuntimeError(f"Rust process failed with exit code {process.returncode}: {stderr}")
+
+        # Parse the JSON response
+        response = json.loads(stdout.strip())
+
+        if response.get("status") == "error":
+            raise RuntimeError(f"Rust function error: {response.get('error_message', 'Unknown error')}")
+
+        {% if return_type == 'bytes' %}
+        return bytes(response.get("data", []))
+        {% else %}
+        return response.get("data")
+        {% endif %}
+
+    except Exception as e:
+        raise RuntimeError(f"Failed to call Rust {{ function_name }} function: {e}")

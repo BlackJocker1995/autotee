@@ -1,4 +1,5 @@
 use std::io::{self, Read};
+use std::panic;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -38,7 +39,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             data: None,
             error_message: Some("Unsupported function".to_string()),
         };
-        println!("{}", serde_json::to_string(&response)?);
         return Ok(());
     }
 
@@ -47,13 +47,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("Failed to parse parameters: {}", e))?;
 
     // Call the function from lib.rs
-    let result = rust::{{ function_name }}({% for param_name, param_type in arguments.items() %}{% if param_type == 'Vec<u8>' %}&{% endif %}params.{{ param_name }}{% if not loop.last %}, {% endif %}{% endfor %});
+    let result = panic::catch_unwind(|| {
+        rust::{{ function_name }}({% for param_name, param_type in arguments.items() %}{% if param_type == 'Vec<u8>' %}&{% endif %}params.{{ param_name }}{% if not loop.last %}, {% endif %}{% endfor %})
+    });
 
     // Create and output JSON response
-    let response = Response {
-        status: "success".to_string(),
-        data: Some(result),
-        error_message: None,
+    let response = match result {
+        Ok(data) => Response {
+            status: "success".to_string(),
+            data: Some(data),
+            error_message: None,
+        },
+        Err(e) => {
+            let error_message = if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "An unknown panic occurred".to_string()
+            };
+            Response {
+                status: "error".to_string(),
+                data: None,
+                error_message: Some(error_message),
+            }
+        }
     };
     println!("{}", serde_json::to_string(&response)?);
 
