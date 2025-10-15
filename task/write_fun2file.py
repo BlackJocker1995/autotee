@@ -40,22 +40,20 @@ def write_sensitive_code_to_files(project_path: str, language: str, sensitive_co
 
             # Wrap the function code in a class with package declaration
             wrapped_code_content = f"""package com.example.project;
-
-public class {class_name} {{
-    {code_content}
-}}
-"""
+            public class {class_name} {{
+                {code_content}
+            }}
+            """
             with open(output_file_path, "w", encoding="utf-8") as f:
                 f.write(wrapped_code_content)
             logger.info(f"Written sensitive Java class to: {output_file_path}")
-        else:
-            # For other languages, write as-is for now (or implement specific wrapping)
-            # The file name will be function_name.language inside the hash subdirectory
-            output_file_name = f"{function_name}.{language}"
+        elif language == "python":
+            # For Python, save the function code as a .py file
+            output_file_name = f"{function_name}.py"
             output_file_path = os.path.join(hash_subdir, output_file_name)
             with open(output_file_path, "w", encoding="utf-8") as f:
                 f.write(code_content)
-            logger.info(f"Written sensitive code block to: {output_file_path}")
+            logger.info(f"Written sensitive Python function to: {output_file_path}")
     logger.info("Finished writing sensitive code blocks to individual files.")
 
 

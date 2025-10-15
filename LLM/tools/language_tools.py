@@ -9,7 +9,8 @@ from typing import Dict, List, Callable, Any, Optional, Union
 from langchain.tools import tool
 import subprocess # Replace pexpect with subprocess
 from jinja2 import Environment, FileSystemLoader
-from analyzers.jacoco.jacoco_analyzer import JacocoAnalyzer
+from analyzers.python.python_analyzer import PythonCoverageAnalyzer
+from analyzers.java.jacoco_analyzer import JacocoAnalyzer
 from utils import file_utils
 import xml.etree.ElementTree as ET
 from pydantic import BaseModel, Field, ConfigDict
@@ -103,7 +104,6 @@ class MavenExecuteUnitTestTool(BaseTool):
         except Exception as e:
              logger.exception(f"An unexpected error occurred during Java unit test execution")
              return f"An unexpected error occurred during Java unit test execution: {e}"
-
 
 class JacocoCoverageReport(BaseModel):
     line_coverage: float = Field(..., description="Overall line coverage percentage.")
@@ -244,7 +244,6 @@ class JavaCompileCheck(BaseTool):
         except Exception as e:
             logger.exception(f"An unexpected error occurred during Java compilation check")
             return f"An unexpected error occurred during Java compilation check: {e}"
-
 
 class TemplateForTrans(BaseTool):
     model_config = ConfigDict(extra='allow') # Allow extra fields for Jinja2 environments
@@ -423,3 +422,54 @@ class TemplateForTrans(BaseTool):
             'Long': 'i64'
         }
         return type_mapping.get(java_type, 'String')
+
+class PythonCoverageReport(BaseModel):
+    line_coverage: float = Field(..., description="Overall line coverage percentage.")
+    branch_coverage: float = Field(..., description="Overall branch coverage percentage.")
+    uncovered_lines_by_file: Dict[str, List[int]] = Field(..., description="Dictionary where keys are file paths (relative to project root) and values are lists of uncovered line numbers.")
+    uncovered_branches_by_file: Dict[str, List[int]] = Field(..., description="Dictionary where keys are file paths (relative to project root) and values are lists of lines with uncovered branches.")
+
+class PythonCoverageTool(BaseTool):
+    name: str = "python_coverage"
+    description: str = '''
+    A tool for calculating code coverage for Python projects using pytest-cov.
+    This tool executes 'pytest --cov=.' to generate a coverage report,
+    then parses the generated coverage.xml report to extract line and branch coverage data.
+    '''
+
+    project_root_path:str
+
+    def __init__(self, project_root_path: str, **kwargs):
+        super().__init__(project_root_path = project_root_path, **kwargs)
+
+    def _run(self) -> Union[PythonCoverageReport, str]:
+        """
+        Executes Python coverage analysis.
+        """
+        try:
+            analyzer = PythonCoverageAnalyzer(self.project_root_path)
+            success = analyzer.analyze_tests()
+
+            if not success:
+                return "Pytest execution failed. See logs for details."
+
+            xml_report_path = os.path.join(self.project_root_path, 'coverage.xml')
+            if not os.path.exists(xml_report_path):
+                return "coverage.xml report not found. Pytest might not have run correctly."
+
+            overall_coverage_data = PythonCoverageAnalyzer.get_overall_coverage(xml_report_path)
+            uncovered_data = PythonCoverageAnalyzer.parse_coverage_report_content(xml_report_path)
+
+            uncovered_lines_by_file = {file_path: data['uncovered'] for file_path, data in uncovered_data.items()}
+            uncovered_branches_by_file = {file_path: data['branch_uncovered'] for file_path, data in uncovered_data.items()}
+
+            return PythonCoverageReport(
+                line_coverage=overall_coverage_data.get('line_coverage', 0.0),
+                branch_coverage=overall_coverage_data.get('branch_coverage', 0.0),
+                uncovered_lines_by_file=uncovered_lines_by_file,
+                uncovered_branches_by_file=uncovered_branches_by_file
+            )
+
+        except Exception as e:
+             logger.exception(f"An unexpected error occurred during python unit test execution")
+             return f"An unexpected error occurred during python unit test execution: {e}"

@@ -65,9 +65,6 @@ def create_test_gen_tools(project_root_path: str,  language:str) -> list[BaseToo
     tools = [
         ListProjectStructureTool(project_root_path=project_root_path),
         ApplyDiffTool(project_root_path=project_root_path),
-        JacocCoverageTool(project_root_path=project_root_path),
-        JavaCompileCheck(project_root_path=project_root_path),
-        MavenExecuteUnitTestTool(project_root_path=project_root_path, is_end_point=False)
     ]
 
     toolkit = FileManagementToolkit(
@@ -76,6 +73,16 @@ def create_test_gen_tools(project_root_path: str,  language:str) -> list[BaseToo
     )
     root_tools = toolkit.get_tools()
     tools.extend(root_tools)
+    
+    if language == "java":
+        tools.extend([
+        JacocCoverageTool(project_root_path=project_root_path),
+        JavaCompileCheck(project_root_path=project_root_path),
+        MavenExecuteUnitTestTool(project_root_path=project_root_path, is_end_point=False)
+        ])
+    elif language == "python":
+        pass
+        
     return tools
 
 
