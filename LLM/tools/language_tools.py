@@ -1,19 +1,16 @@
-from ctypes import util
-from pathlib import Path
 import re
 import os
-import shutil # Import shutil for directory removal
+from langchain_core.tools.base import ArgsSchema
+from pydantic.config import ConfigDict
 import toml
 from loguru import logger
-from typing import Dict, List, Callable, Any, Optional, Union
-from langchain.tools import tool
+from typing import Any, Dict, List,Optional, Union
 import subprocess # Replace pexpect with subprocess
 from jinja2 import Environment, FileSystemLoader
 from analyzers.python.python_analyzer import PythonCoverageAnalyzer
 from analyzers.java.jacoco_analyzer import JacocoAnalyzer
 from utils import file_utils
-import xml.etree.ElementTree as ET
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 
@@ -67,7 +64,7 @@ class MavenExecuteUnitTestTool(BaseTool):
     def _run(self) -> str:
         command = "" # Initialize for exception handling
         try:
-            command = f'mvn clean test'
+            command = 'mvn clean test'
             logger.debug(f"Executing command: {command} in {self.project_root_path}")
 
             process = subprocess.run(command, cwd=self.project_root_path, capture_output=True, text=True, shell=True, timeout=300)
@@ -100,9 +97,9 @@ class MavenExecuteUnitTestTool(BaseTool):
 
         except subprocess.TimeoutExpired:
              logger.error(f"Command '{command}' timed out after 300 seconds.")
-             return f"Error: Command execution timed out."
+             return "Error: Command execution timed out."
         except Exception as e:
-             logger.exception(f"An unexpected error occurred during Java unit test execution")
+             logger.exception("An unexpected error occurred during Java unit test execution")
              return f"An unexpected error occurred during Java unit test execution: {e}"
 
 class JacocoCoverageReport(BaseModel):
@@ -136,7 +133,7 @@ class JacocCoverageTool(BaseTool):
         """
         try:
             # Construct and execute the Maven command to generate the JaCoCo report
-            command = f'mvn test jacoco:report'
+            command = 'mvn test jacoco:report'
             logger.debug(f"Executing command: {command} in {self.project_root_path}")
             try:
                 # Run the Maven command. If it times out, a TimeoutExpired exception will be caught.
@@ -169,10 +166,10 @@ class JacocCoverageTool(BaseTool):
             )
 
         except subprocess.TimeoutExpired:
-             logger.error(f"Command timed out after 300 seconds.")
+             logger.error("Command timed out after 300 seconds.")
              return "Error: Command execution timed out."
         except Exception as e:
-             logger.exception(f"An unexpected error occurred during Java unit test execution")
+             logger.exception("An unexpected error occurred during Java unit test execution")
              return f"An unexpected error occurred during Java unit test execution: {e}"
 
 class JavaCompileCheck(BaseTool):
@@ -211,7 +208,7 @@ class JavaCompileCheck(BaseTool):
     def _run(self) -> str:
         command = "" # Initialize for exception handling
         try:
-            command = f'mvn compile'
+            command = 'mvn compile'
             logger.debug(f"Executing command: {command} in {self.project_root_path}")
 
             process = subprocess.run(command, cwd=self.project_root_path, capture_output=True, text=True, shell=True, timeout=300)
@@ -242,35 +239,43 @@ class JavaCompileCheck(BaseTool):
             logger.error(f"Command '{command}' timed out after 300 seconds.")
             return f"Error: Command '{command}' timed out."
         except Exception as e:
-            logger.exception(f"An unexpected error occurred during Java compilation check")
+            logger.exception("An unexpected error occurred during Java compilation check")
             return f"An unexpected error occurred during Java compilation check: {e}"
+
+class TemplateForTransInput(BaseModel):
+    function_name: str = Field(description="Name of the function to link")
+    arguments: Dict[str, str] = Field(description="A dictionary mapping argument names to their Java types. For example: {'param1': 'String', 'param2': 'int'}")
+    return_type: str = Field(description="Java return type of the function")
 
 class TemplateForTrans(BaseTool):
     model_config = ConfigDict(extra='allow') # Allow extra fields for Jinja2 environments
     name: str = "create_template_for_transformation"
+    args_schema: Optional[ArgsSchema] = TemplateForTransInput
     description: str = '''
     Generates Java and Rust code templates to link functions, facilitating communication between the two languages.
     This tool adapts existing Java and Rust templates based on a given function signature (function name, Java arguments, and Java return type).
     '''
-    
+
     project_root_path: str
-    
+    java_env: Any = None
+    rust_env: Any = None
+
     def __init__(self, project_root_path: str, **kwargs):
         super().__init__(project_root_path = project_root_path, **kwargs)
         # The templates are in the workspace's utils directory, not the dynamic project_root_path
         workspace_root = os.getcwd()
-        self.java_template_dir = os.path.join(workspace_root, 'utils', 'java')
-        self.rust_template_dir = os.path.join(workspace_root, 'utils', 'rust')
-        self.java_env = Environment(loader=FileSystemLoader(self.java_template_dir))
-        self.rust_env = Environment(loader=FileSystemLoader(self.rust_template_dir))
+        java_template_dir = os.path.join(workspace_root, 'utils', 'java')
+        rust_template_dir = os.path.join(workspace_root, 'utils', 'rust')
+        self.java_env = Environment(loader=FileSystemLoader(java_template_dir))
+        self.rust_env = Environment(loader=FileSystemLoader(rust_template_dir))
 
-    def _generate_java_code(self, function_name: str, snake_case_function_name: str, arguments: dict, return_type: str) -> str:
+    def _generate_java_code(self, function_name: str, snake_case_function_name: str, arguments: Dict[str, str], return_type: str) -> str:
         """Generate Java code by adapting the template using Jinja2."""
         try:
             template = self.java_env.get_template('java_link_template.jinja')
-            
+
             signature_params = [f"{param_type} {param_name}" for param_name, param_type in arguments.items()]
-            
+
             getter_method = self._get_gson_getter_method(return_type)
             return template.render(
                 function_name=function_name,
@@ -287,7 +292,7 @@ class TemplateForTrans(BaseTool):
     def _generate_rust_code(self, function_name: str, rust_arguments: dict, rust_return_type: str) -> str:
         """
         Generate Rust code by adapting the template using Jinja2.
-        
+
         Args:
             function_name: Name of the function to link
             rust_arguments: Dictionary of argument names and their Rust types
@@ -295,7 +300,7 @@ class TemplateForTrans(BaseTool):
         """
         try:
             template = self.rust_env.get_template('main.jinja')
-            
+
             return template.render(
                 function_name=function_name,
                 arguments=rust_arguments,
@@ -305,15 +310,15 @@ class TemplateForTrans(BaseTool):
             logger.error(f"Failed to generate Rust code with Jinja2: {e}")
             return ""
 
-    def _run(self, function_name: str, arguments: dict, return_type: str) -> str:
+    def _run(self, function_name: str, arguments: Dict[str, str], return_type: str) -> str:
         """
         Generate adapted Java and Rust code for function linking.
-        
+
         Args:
             function_name: Name of the function to link
             arguments: Dictionary of argument names and their Java types
             return_type: Java return type of the function
-            
+
         Returns:
             String containing generated Java and Rust code
         """
@@ -329,26 +334,26 @@ class TemplateForTrans(BaseTool):
             rust_arguments = {name: self._java_to_rust_type(j_type) for name, j_type in arguments.items()}
             rust_return_type = self._java_to_rust_type(return_type)
             rust_code = self._generate_rust_code(snake_case_function_name, rust_arguments, rust_return_type)
-            
+
             if not java_code or not rust_code:
                 return "Failed to generate linking code. Check if template files exist."
 
             # 1. Write Rust code to the appropriate file
             rust_main_path = os.path.join(self.project_root_path, 'rust', 'src', 'main.rs')
             file_utils.write_file(rust_main_path, rust_code)
-            
+
             self._merge_cargo_toml()
-            
+
             # 2. Backup SensitiveFun.java to BKSensitiveFun.java and Replace the Java code
             java_main_file = os.path.join(self.project_root_path, "src", "main", "java", "com", "example", "project", "SensitiveFun.java")
-            
+
             file_utils.write_file(java_main_file, java_code)
 
             # 3. Return generated template results
             result = f"Generated Java-Rust Linking Code for function '{function_name}"
 
             return result
-            
+
         except Exception as e:
             logger.exception(f"Error generating Java-Rust linking code: {e}")
             raise ValueError("Error generating Java-Rust linking code")
@@ -358,9 +363,9 @@ class TemplateForTrans(BaseTool):
         cargo_template_path = os.path.join(os.getcwd(), 'utils', 'rust', 'Cargo.toml')
         template_cargo_content = file_utils.read_file(cargo_template_path)
         template_cargo = toml.loads(template_cargo_content)
-        
+
         rust_cargo_path = os.path.join(self.project_root_path, 'rust', 'Cargo.toml')
-        
+
         if os.path.exists(rust_cargo_path):
             existing_cargo_content = file_utils.read_file(rust_cargo_path)
             existing_cargo = toml.loads(existing_cargo_content)
@@ -374,7 +379,7 @@ class TemplateForTrans(BaseTool):
             for dep, version in template_cargo['dependencies'].items():
                 if dep not in existing_cargo['dependencies']:
                     existing_cargo['dependencies'][dep] = version
-        
+
         # Ensure other sections from template are present if missing
         for section in template_cargo:
             if section != 'dependencies' and section not in existing_cargo:
@@ -471,5 +476,5 @@ class PythonCoverageTool(BaseTool):
             )
 
         except Exception as e:
-             logger.exception(f"An unexpected error occurred during python unit test execution")
+             logger.exception("An unexpected error occurred during python unit test execution")
              return f"An unexpected error occurred during python unit test execution: {e}"

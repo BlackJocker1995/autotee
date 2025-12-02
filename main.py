@@ -33,7 +33,8 @@ def main():
         "sensitive": {"func": query_sensitive_project, "params": {"llm_config": LLMConfig(provider='vllm', model='Qwen3-coder:30b')}},
         "write": {"func": write_sen2file, "params": {"llm_config": LLMConfig(provider='vllm', model='Qwen3-coder:30b')}},
         "test": {"func": run_create_test_workflow, "params": {"llm_config": LLMConfig(provider='vllm', model='Qwen3-coder:30b')}},
-        "transform": {"func": run_transform_workflow, "params": {"llm_config": LLMConfig(provider='sglang', model='Llama3.1')}},
+        "transform": {"func": run_transform_workflow, "params": {"llm_config": LLMConfig(provider='vllm', model='Qwen3-coder:30b')}},
+
 
     }
     # Check if correct number of arguments provided

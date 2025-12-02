@@ -15,9 +15,9 @@ def extract_token_usage(chunk: Dict[str, Any]) -> int:
         The total number of tokens used in the chunk.
     """
     total_tokens_for_chunk = 0
-    # The token usage is in the 'agent' or '__end__' node of the graph
-    for key in ('agent', '__end__'):
-        if not (value := chunk.get(key)):
+    # The token usage can be in any node of the graph
+    for value in chunk.values():
+        if not value or not isinstance(value, dict):
             continue
 
         if messages := value.get("messages"):

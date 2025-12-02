@@ -103,7 +103,7 @@ def run_transform_workflow(project_path: str, language: str, llm_config: LLMConf
                 logger.info(f"Token usage for this step: {current_chunk_tokens}")
                 token_usage_steps += 1 # Increment counter if tokens were used
 
-            bool_result, last_stream_message = process_chunk(chunk)
+            bool_result, _ = process_chunk(chunk)
             if bool_result:
                 break
 
@@ -113,6 +113,4 @@ def run_transform_workflow(project_path: str, language: str, llm_config: LLMConf
             logger.info(f"Average tokens per step: {average_tokens:.2f}")
         else:
             logger.info("No token usage recorded for any step.")
-
-
     logger.info("Finished abstract test creation workflow.")

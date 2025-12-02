@@ -14,24 +14,20 @@ In this project, we introduce AutoTEE, an automated approach that adapts existin
 - **Functional Consistency**: Ensures functional consistency through test cases and iterative refinement.
 - **Seamless Integration**: Further code alteration and merging to integrate the transformed code with the original program, achieving automatic TEE protection.
 
-## Deployment
+## Setup
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/yourusername/autotee.git
-   cd autotee
-   ```
+1.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/yourusername/autotee.git
+    cd autotee
+    ```
 
-2. **Create and activate a virtual environment**:
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
-
-3. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+2.  **Install `uv`**:
+    This project uses `uv` to run. If you don't have it installed, you can install it with:
+    ```bash
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    ```
+    `uv` will automatically manage the virtual environment and dependencies from `requirements.txt`.
 
 ## Configuration
 
@@ -57,7 +53,7 @@ To use LLM providers that require an API key (like OpenAI, Google, DeepSeek), yo
 
 ## Usage
 
-The main entry point for the program is `main.py`. You can execute different functions by specifying the task name in the command line.
+The main entry point for the program is `main.py`. Use `uv run` to execute tasks. This command will automatically install the required dependencies into a managed virtual environment and run the script.
 
 **Important:** Before running, you must manually edit the `main.py` file to set the `project_name` variable to the absolute path of the project you wish to analyze.
 
@@ -68,7 +64,7 @@ project_name = "/path/to/your/project"
 
 **Command format**:
 ```bash
-python main.py <task>
+uv run main.py <task>
 ```
 
 **Available tasks**:
@@ -80,7 +76,7 @@ python main.py <task>
 
 **Example**:
 ```bash
-python main.py transform
+uv run  main.py transform
 ```
 
 ## Intel SGX Support
@@ -88,4 +84,3 @@ python main.py transform
 ### Test Environment
 - Ubuntu 22.04 - 5.15.0-117-generic, VM, Ali cloud Z8 (Support SGX HW);
 - Ubuntu 22.04, Intel I7-9700 (SGX1.0);
-
