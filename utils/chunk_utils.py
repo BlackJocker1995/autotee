@@ -1,8 +1,44 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
-import queue
+from typing import Any, Dict, Tuple
 from loguru import logger
+from langchain_core.messages import BaseMessage # Added import for BaseMessage
+
+
+def extract_token_usage(chunk: Dict[str, Any]) -> int:
+    """Extracts total token usage from a LangGraph stream chunk.
+
+    Args:
+        chunk: A chunk returned by LangGraph during streaming.
+
+    Returns:
+        The total number of tokens used in the chunk.
+    """
+    total_tokens_for_chunk = 0
+    # The token usage is in the 'agent' or '__end__' node of the graph
+    for key in ('agent', '__end__'):
+        if not (value := chunk.get(key)):
+            continue
+
+        if messages := value.get("messages"):
+            # Ensure the message is of type BaseMessage to access response_metadata
+            last_message: BaseMessage = messages[-1]
+            current_total_tokens = 0
+
+            # Prioritize usage_metadata if available and contains the relevant keys
+            if hasattr(last_message, "usage_metadata") and last_message.usage_metadata:
+                if "total_tokens" in last_message.usage_metadata:
+                    current_total_tokens = last_message.usage_metadata.get("total_tokens", 0)
+
+            # Fallback to response_metadata['token_usage'] if usage_metadata doesn't provide it
+            if current_total_tokens == 0 and \
+               hasattr(last_message, "response_metadata") and \
+               (token_usage := last_message.response_metadata.get("token_usage")):
+                current_total_tokens = token_usage.get("total_tokens", 0)
+
+            total_tokens_for_chunk += current_total_tokens
+    return total_tokens_for_chunk
+
 
 def process_chunk(
     chunk: Dict[str, Any],
@@ -47,7 +83,7 @@ def process_chunk(
                     logger.debug(truncated_msg)
                 else:
                     logger.debug(ai_msg_str)
-                
+
                 # Check if it's a termination marker
                 if "[Terminate]" in ai_msg_str:
                     # Terminate, return True + empty string
@@ -61,8 +97,7 @@ def process_chunk(
 
     except Exception as exc:
         # Log error
-        error_msg = f"[red]Error in process_chunk:[/] {exc}"
-        logger.error("error")
+        logger.error(f"error: {exc}")
         # Another log entry (optional: send to lower level or console)
         # On error return False + empty string, caller can handle appropriately
         return False, ""

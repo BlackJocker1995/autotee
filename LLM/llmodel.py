@@ -1,9 +1,9 @@
 from abc import ABC
-from json import tool
+
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings
-from typing import Any, Dict, Optional, List, Union, Type
+from typing import   Optional, Type
 import os
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -75,12 +75,14 @@ class LLModel(ABC):
         "deepseek": ChatDeepSeek,
         "google": ChatGoogleGenerativeAI,
         'vllm': ChatOpenAI,
+        'sglang': ChatOpenAI,
         'ollama': ChatOllama
     }
     # Provider-specific configuration adjustments
     _provider_base_urls = {
         "ollama": "http://localhost:11434",
-        "vllm": "http://localhost:30000/v1"
+        "vllm": "http://localhost:30000/v1",
+        "sglang": "http://10.193.104.137:30000/v1"
     }
     def __init__(self, config: "LLMConfig"):
         """
@@ -101,16 +103,17 @@ class LLModel(ABC):
         chat_model_class = self._chat_model_map.get(self.provider)
         if not chat_model_class:
             raise ValueError(f"Unsupported provider: {self.provider}")
-        
+
         self.llm = chat_model_class(
             model=config.model,
             request_timeout=config.request_timeout,
             #max_retries=config.max_retries,
             max_tokens = config.max_tokens,
             api_key=api_key,
-            base_url=config.base_url if config.base_url else None
+            base_url=config.base_url if config.base_url else None,
+            model_kwargs={"parallel_tool_calls": False}
         )
-       
+
 
     def get_description(self) -> str:
         """
@@ -122,7 +125,7 @@ class LLModel(ABC):
         # Replace characters potentially problematic in directory names (like '.') with underscores.
         safe_model_name = self.config.model.replace('.', '_').replace('/', '_').replace(':', '-')
         return f"{self.provider}_{safe_model_name}"
-    
+
     @classmethod
     def get_short_name(cls,model_client:str) -> str:
         """
@@ -181,20 +184,20 @@ class LLModel(ABC):
             raise ValueError("LLM model not initialized.")
         if system_prompt:
             self.system_prompt = system_prompt
-            
+
         # Use the provided system prompt
         prompt = ChatPromptTemplate.from_messages([
             SystemMessage(content=self.system_prompt),
             ("human", "{input}")
         ])
-     
+
         if output_format:
             out = prompt | self.llm.with_structured_output(output_format)
         else:
             out = prompt | self.llm
 
         return out
-    
+
     def create_stateless_chat(self, system_prompt: str = "", output_format: Optional[Type[BaseModel]] = None):
         """
         Creates a stateless chat runnable that does not modify the instance's system prompt.
@@ -211,20 +214,20 @@ class LLModel(ABC):
 
         # Use the provided system prompt or the instance's default
         current_prompt = system_prompt if system_prompt else self.system_prompt
-        
+
         prompt = ChatPromptTemplate.from_messages([
             SystemMessage(content=current_prompt),
             ("human", "{input}")
         ])
-     
+
         if output_format:
             out = prompt | self.llm.with_structured_output(output_format)
         else:
             out = prompt | self.llm
 
         return out
-    
-    
+
+
 
     def create_tool_react(self, tools: list, system_prompt:str) -> Runnable:
         """

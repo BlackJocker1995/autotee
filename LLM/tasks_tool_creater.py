@@ -1,6 +1,5 @@
 import os
-from pathlib import Path
-from typing import Optional
+
 from langchain_core.tools import BaseTool
 from langchain_community.agent_toolkits import FileManagementToolkit
 
@@ -73,7 +72,7 @@ def create_test_gen_tools(project_root_path: str,  language:str) -> list[BaseToo
     )
     root_tools = toolkit.get_tools()
     tools.extend(root_tools)
-    
+
     if language == "java":
         tools.extend([
         JacocCoverageTool(project_root_path=project_root_path),
@@ -82,7 +81,5 @@ def create_test_gen_tools(project_root_path: str,  language:str) -> list[BaseToo
         ])
     elif language == "python":
         pass
-        
+
     return tools
-
-

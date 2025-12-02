@@ -1,14 +1,11 @@
 import os
 from LLM.llmodel import LLMConfig, LLModel
-from LLM.tasks_tool_creater import create_test_gen_tools, create_transform_tools
+from LLM.tasks_tool_creater import create_transform_tools
 from LLM.tools.cargo_tool import cargo_new
-from static.projectUtil import read_code_block, save_code_block, short_hash
 from loguru import logger
 
-from utils.chunk_utils import process_chunk
-from static.get_env import return_env # To get the project root for template
-from utils.maven_utils import get_java_pom_template
-# from build.language_tools import create_java_tools # No longer needed
+from utils.chunk_utils import process_chunk, extract_token_usage # Import extract_token_usage
+
 
 def get_transform_prompt(language, source_code):
     return {
@@ -49,21 +46,22 @@ Your final output must be a single, complete Rust code block containing the full
         ]
     }
 
+
 def run_transform_workflow(project_path: str, language: str, llm_config: LLMConfig) -> None:
     logger.info("Starting the create test workflow.")
 
     # Define the directory where individual code files were saved
     project_code_files_dir = os.path.join(project_path, "project_code_files")
-    
+
     # Iterate through the project_code_files directory to find code blocks
     # Each subdirectory in project_code_files_dir represents a code block identified by its hash
-    
+
     if not os.path.exists(project_code_files_dir):
         logger.warning(f"Project code files directory not found: {project_code_files_dir}. Exiting test creation workflow.")
         return
 
     code_block_hashes = [d for d in os.listdir(project_code_files_dir) if os.path.isdir(os.path.join(project_code_files_dir, d))]
-    
+
     if not code_block_hashes:
         logger.info("No code blocks found in project_code_files. Exiting test creation workflow.")
         return
@@ -72,12 +70,12 @@ def run_transform_workflow(project_path: str, language: str, llm_config: LLMConf
 
     for i, code_hash in enumerate(code_block_hashes):
         hash_subdir = os.path.join(project_code_files_dir, code_hash)
-    
+
         cargo_new(hash_subdir)
         java_main_file = os.path.join(hash_subdir, "src", "main", "java", "com", "example", "project","SensitiveFun.java")
         with open(java_main_file) as f:
             source_code = f.read()
-        
+
         created_tools = create_transform_tools(
             project_root_path=hash_subdir,
             language=language,
@@ -94,12 +92,27 @@ def run_transform_workflow(project_path: str, language: str, llm_config: LLMConf
         agent_executor = llm.create_tool_react(created_tools, system_prompt)
 
         initial_input = get_transform_prompt(language, source_code)
-        
+
          # Run
+        total_all_tokens = 0
+        token_usage_steps = 0 # Initialize counter for steps with token usage
         for chunk in agent_executor.stream(initial_input, config={"recursion_limit": 150}):
+            current_chunk_tokens = extract_token_usage(chunk)
+            total_all_tokens += current_chunk_tokens
+            if current_chunk_tokens > 0:
+                logger.info(f"Token usage for this step: {current_chunk_tokens}")
+                token_usage_steps += 1 # Increment counter if tokens were used
+
             bool_result, last_stream_message = process_chunk(chunk)
             if bool_result:
                 break
+
+        logger.info(f"Total tokens for the workflow: {total_all_tokens}")
+        if token_usage_steps > 0:
+            average_tokens = total_all_tokens / token_usage_steps
+            logger.info(f"Average tokens per step: {average_tokens:.2f}")
+        else:
+            logger.info("No token usage recorded for any step.")
 
 
     logger.info("Finished abstract test creation workflow.")
