@@ -9,13 +9,12 @@ import os
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_deepseek import ChatDeepSeek
-from langgraph.prebuilt import create_react_agent
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
 from langchain_core.messages import SystemMessage
 from langchain_community.chat_models.tongyi import ChatTongyi
 from langchain_ollama import ChatOllama
-
+from langchain.agents import create_agent
 
 class LLMConfig(BaseSettings):
     """Configuration for LLM models. Only contains non-sensitive settings."""
@@ -110,8 +109,7 @@ class LLModel(ABC):
             #max_retries=config.max_retries,
             max_tokens = config.max_tokens,
             api_key=api_key,
-            base_url=config.base_url if config.base_url else None,
-            model_kwargs={"parallel_tool_calls": False}
+            base_url=config.base_url if config.base_url else None
         )
 
 
@@ -242,4 +240,4 @@ class LLModel(ABC):
 
         if self.llm is None:
             raise ValueError("LLM model not initialized.")
-        return create_react_agent(self.llm, tools=tools, prompt=SystemMessage(content=system_prompt))
+        return create_agent(self.llm, tools=tools, system_prompt=system_prompt)
