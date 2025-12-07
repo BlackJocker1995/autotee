@@ -6,7 +6,7 @@ from langchain_community.agent_toolkits import FileManagementToolkit
 from LLM.states.task_states import TaskState
 from LLM.tools.cargo_tool import CargoCheckTool
 from LLM.tools.file_tool import ApplyDiffTool, ListProjectStructureTool
-from LLM.tools.language_tools import JacocCoverageTool, JavaCompileCheck, TemplateForTrans, MavenExecuteUnitTestTool
+from LLM.tools.language_tools import JacocCoverageTool, JavaCompileCheck, PythonUVInstallTestTool, TemplateForTrans, MavenExecuteUnitTestTool, CoveragePyTool, PytestExecuteUnitTestTool
 
 def create_transform_tools(project_root_path: str,  language:str, task_state: TaskState) -> list[BaseTool]:
     """
@@ -55,7 +55,7 @@ def create_test_gen_tools(project_root_path: str,  language:str, task_state: Tas
     File management tools will operate relative to project_path.
 
     Args:
-        project_root_path: The root path for the project, used by custom tools and file management.
+        project_path: The root path for the project, used by custom tools and file management.
         language: The programming language of the project.
         task_state: The task state object for tracking the progress of the task.
 
@@ -81,6 +81,10 @@ def create_test_gen_tools(project_root_path: str,  language:str, task_state: Tas
         MavenExecuteUnitTestTool(project_root_path=project_root_path, task_state=task_state)
         ])
     elif language == "python":
-        pass
+        tools.extend([
+            CoveragePyTool(project_root_path=project_root_path, task_state=task_state),
+            PytestExecuteUnitTestTool(project_root_path=project_root_path, task_state=task_state),
+            PythonUVInstallTestTool(project_root_path=project_root_path, task_state=task_state)
+        ])
 
     return tools

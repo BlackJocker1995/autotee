@@ -5,7 +5,7 @@ from loguru import logger
 class PythonWriter(BaseWriter):
     def _write_single_file(self, index: int, code_block: dict, hash_subdir: str) -> None:
         code_content = code_block.get("code", "")
-        function_name = code_block.get("function_name", f"unknown_func_{index}")
+        function_name = code_block.get("function_name", f"sensitive_fun")
         
         # For Python, save the function code as a .py file
         output_file_name = f"{function_name}.py"

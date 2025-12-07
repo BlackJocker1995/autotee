@@ -509,8 +509,166 @@ class PythonCoverageReport(BaseModel):
     uncovered_lines_by_file: Dict[str, List[int]] = Field(..., description="Dictionary where keys are file paths (relative to project root) and values are lists of uncovered line numbers.")
     uncovered_branches_by_file: Dict[str, List[int]] = Field(..., description="Dictionary where keys are file paths (relative to project root) and values are lists of lines with uncovered branches.")
 
-class PythonCoverageTool(BaseTool):
-    name: str = "python_coverage"
+class PytestExecuteUnitTestTool(BaseTool):
+    name: str = "execute_unit_test"
+    description: str = '''
+    This tool executes a Python unit test file using pytest.
+    The tool will return a summary of the test results.
+    '''
+    project_root_path: str
+    task_state: TaskState
+
+    def __init__(self, project_root_path: str, task_state: TaskState, **kwargs):
+        super().__init__(project_root_path=project_root_path, task_state=task_state, **kwargs)
+
+    def _run(self) -> str:
+        # Navigate up to the project_name directory from the hash_dir
+        project_base_path = os.path.abspath(os.path.join(self.project_root_path, os.pardir, os.pardir))
+        shared_venv_path = os.path.join(project_base_path, ".venv")
+
+        # Ensure the shared venv exists, creating it in project_base_path if necessary
+        if not os.path.exists(shared_venv_path):
+            logger.info(f"Shared venv not found at {shared_venv_path}, creating it in {project_base_path}.")
+            try:
+                subprocess.run(
+                    "uv venv", # This will create .venv in the cwd
+                    cwd=project_base_path,
+                    capture_output=True,
+                    text=True,
+                    shell=True,
+                    check=True
+                )
+            except subprocess.CalledProcessError as e:
+                return f"Failed to create shared virtual environment in {project_base_path}: {e.stderr}"
+
+        pytest_executable = os.path.join(shared_venv_path, "bin/pytest")
+        command = f"PYTHONPATH=. {pytest_executable} test_sensitive_fun.py --cov --cov-branch --cov-report=xml"
+
+        try:
+            process = subprocess.run(
+                command,
+                cwd=self.project_root_path, # The test execution still happens in the hash_dir
+                capture_output=True,
+                text=True,
+                shell=True,
+                timeout=300,
+            )
+            
+            output = process.stdout + process.stderr
+            output = output.replace(f"{self.project_root_path}/", "")
+
+            if process.returncode != 0 and "no tests ran" not in output:
+                self.task_state.set_failed("test_pass")
+                errors_match = re.search(r"={10,}\s+ERRORS\s+={10,}(.*?)={10,}", output, re.DOTALL)
+                failures_match = re.search(r"={10,}\s+FAILURES\s+={10,}(.*?)={10,}", output, re.DOTALL)
+                
+                error_content = ""
+                if errors_match:
+                    error_content += f"ERRORS:\n{errors_match.group(1).strip()}\n"
+                if failures_match:
+                    error_content += f"FAILURES:\n{failures_match.group(1).strip()}\n"
+
+                if error_content:
+                    return error_content.strip()
+                
+                return f"Test execution failed. Full output:\n{output}"
+
+            summary_pattern = re.compile(r"={10,}\s((?:\d+\s\w+,\s)*\d+\s\w+)\sin\s[\d\.]+s\s={10,}")
+            summary_match = summary_pattern.search(output)
+
+            if summary_match:
+                summary = summary_match.group(1)
+                if "failed" in summary or "errors" in summary:
+                    self.task_state.set_failed("test_pass")
+                    failures_match = re.search(r"={10,}\s+FAILURES\s+={10,}(.*?)={10,}", output, re.DOTALL)
+                    if failures_match:
+                        return f"FAILURES:\n{failures_match.group(1).strip()}"
+                    return f"Test failed: {summary}. No detailed failure report found."
+                elif "passed" in summary and "failed" not in summary and "errors" not in summary:
+                    self.task_state.set_success("test_pass")
+                    return f"{summary}, go the next step, using `analyze_coverage` tool."
+                else: # e.g. no tests ran
+                    self.task_state.set_failed("test_pass")
+                    return f"Tests ran with status: {summary}"
+            
+            if "no tests ran" in output:
+                self.task_state.set_failed("test_pass")
+                return "No tests were run. Please check the test file path and configuration."
+
+            return f"Could not parse pytest output. Raw output:\n{output}"
+
+        except subprocess.TimeoutExpired:
+            self.task_state.set_failed("test_pass")
+            return "Pytest execution timed out after 300 seconds."
+        except Exception as e:
+            self.task_state.set_failed("test_pass")
+            logger.exception("An unexpected error occurred during pytest execution")
+            return f"An unexpected error occurred during pytest execution: {e}"
+
+class UVInstallInput(BaseModel):
+    dependencies: str = Field(..., description="A string of dependencies to install, separated by spaces.")
+
+class PythonUVInstallTestTool(BaseTool):
+    name: str = "uv_pip_install"
+    description: str = "Installs Python dependencies using 'uv pip install'. Provide a string of dependencies separated by spaces."
+    args_schema: Optional[ArgsSchema] = UVInstallInput
+    project_root_path: str
+
+    def __init__(self, project_root_path: str, **kwargs):
+        super().__init__(project_root_path=project_root_path, **kwargs)
+
+    def _run(self, dependencies: str) -> str:
+        if not dependencies:
+            return "No dependencies provided to install."
+
+        # Navigate up to the project_name directory from the hash_dir
+        project_base_path = os.path.abspath(os.path.join(self.project_root_path, os.pardir, os.pardir))
+        shared_venv_path = os.path.join(project_base_path, ".venv")
+
+        # Ensure the shared venv exists, creating it in project_base_path if necessary
+        if not os.path.exists(shared_venv_path):
+            logger.info(f"Shared venv not found at {shared_venv_path}, creating it in {project_base_path}.")
+            try:
+                subprocess.run(
+                    "uv venv", # This will create .venv in the cwd
+                    cwd=project_base_path,
+                    capture_output=True,
+                    text=True,
+                    shell=True,
+                    check=True
+                )
+            except subprocess.CalledProcessError as e:
+                return f"Failed to create shared virtual environment in {project_base_path}: {e.stderr}"
+
+        # Install dependencies into the shared venv, running from the project_base_path
+        command = f". {shared_venv_path}/bin/activate && uv pip install {dependencies}"
+        
+        try:
+            process = subprocess.run(
+                command,
+                cwd=self.project_root_path, # Run install from the project root
+                capture_output=True,
+                text=True,
+                shell=True,
+                timeout=300,
+                executable="/bin/bash"
+            )
+            
+            output = process.stdout + process.stderr
+            
+            if process.returncode != 0:
+                return f"Failed to install dependencies. Return code: {process.returncode}. Output:\n{output}"
+            
+            return f"Successfully installed dependencies: {dependencies}.\nOutput:\n{output}"
+
+        except subprocess.TimeoutExpired:
+            return f"Dependency installation timed out after 300 seconds for command: {command}"
+        except Exception as e:
+            logger.exception("An unexpected error occurred during dependency installation.")
+            return f"An unexpected error occurred during dependency installation: {e}"
+
+class CoveragePyTool(BaseTool):
+    name: str = "coverage_py"
     description: str = '''
     A tool for calculating code coverage for Python projects using pytest-cov.
     This tool executes 'pytest --cov=.' to generate a coverage report,
@@ -518,9 +676,11 @@ class PythonCoverageTool(BaseTool):
     '''
 
     project_root_path:str
+    task_state: TaskState | None = None
 
-    def __init__(self, project_root_path: str, **kwargs):
-        super().__init__(project_root_path = project_root_path, **kwargs)
+    def __init__(self, project_root_path: str, task_state: TaskState | None = None, **kwargs):
+        super().__init__(project_root_path = project_root_path, task_state = task_state, **kwargs)
+
 
     def _run(self) -> Union[PythonCoverageReport, str]:
         """

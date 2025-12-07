@@ -40,7 +40,7 @@ class JavaTestWorkflow(BaseTestWorkflow):
                 (
                     "user",
                     f"""
-        Generate a diverse set of test inputs for  {self.language} project located at `{self.hash_subdir}`, aiming to maximize both line and branch coverage.
+        Generate a diverse set of unit test inputs for  {self.language} project, aiming to maximize both line and branch coverage.
         Enhance the unit test coverage (line and branch) for the specified code unit.
         Ensure generated tests are syntactically correct, invoke relevant methods with appropriate inputs, and include assertions to validate expected behavior.
         If the added unit tests do not increase coverage, they will not be kept. The generated tests can only be assertEquals and assertThrows, and assertThrows can only be Exception.class

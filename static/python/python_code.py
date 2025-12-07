@@ -42,34 +42,93 @@ class PythonCode(ProgramCode):
         self.language_name = "python"
 
         
-    def match_leaf_block(self, file_path: str, code: str, root_node: Node, lang_name: str) -> List[Dict[str, Any]]:
+    def ast_code_from_files(self, files: List[str]) -> List[Dict[str, Any]]:
+        """
+        Extracts AST code blocks from a list of files.
+        This overridden version first scans all files to gather all function names,
+        then processes each file to find leaf functions.
+        """
+        self._load_language(self.language_name)
+        if not self.parser:
+            logger.error("Parser not initialized, cannot process files.")
+            return []
+            
+        all_function_names = set()
+        file_contents = {}
+        file_trees = {}
+
+        # First pass: Parse all files and collect all function names
+        for file_path in files:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as file:
+                    code = file.read()
+                    file_contents[file_path] = code
+                tree = self.parser.parse(bytes(code, "utf8"))
+                root_node = tree.root_node
+                file_trees[file_path] = root_node
+                
+                # Collect function names from this file
+                stack = [root_node]
+                while stack:
+                    node = stack.pop()
+                    if node.type == "function_definition":
+                        name_node = node.child_by_field_name("name")
+                        if name_node:
+                            all_function_names.add(self._node_text(name_node, code))
+                    
+                    for child in reversed(node.children):
+                        stack.append(child)
+            except Exception as e:
+                logger.error(f"Error in first pass processing file {file_path}: {e}")
+
+        # Second pass: Find leaf functions in each file
+        all_code_blocks = []
+        for file_path in files:
+            if file_path in file_trees:
+                try:
+                    code = file_contents[file_path]
+                    root_node = file_trees[file_path]
+                    # Pass all function names to the matching method
+                    code_blocks = self.match_leaf_block(file_path, code, root_node, self.language_name, all_function_names)
+                    all_code_blocks.extend(code_blocks)
+                except Exception as e:
+                    logger.error(f"Error in second pass processing file {file_path}: {e}")
+        
+        return all_code_blocks
+
+        
+    def match_leaf_block(self, file_path: str, code: str, root_node: Node, lang_name: str, function_names: set = None) -> List[Dict[str, Any]]:
         if lang_name != "python":
             return []
 
         leaf_functions = []
         function_definitions = []
-        function_names = set() # Stores function names
 
-        # First pass: Collect all function definitions and their names
+        # First pass: Collect all function definitions from the current file.
         stack = [root_node]
         while stack:
             node = stack.pop()
             if node.type == "function_definition":
                 function_definitions.append(node)
-                
-                # Extract function name
-                name_node = node.child_by_field_name("name")
-                function_name = self._node_text(name_node, code) if name_node else ""
-                function_names.add(function_name)
-            
             for child in reversed(node.children):
                 stack.append(child)
+
+        # If project-wide function names aren't provided, fall back to local names.
+        if function_names is None:
+            function_names = set()
+            for func_def in function_definitions:
+                name_node = func_def.child_by_field_name("name")
+                if name_node:
+                    function_names.add(self._node_text(name_node, code))
 
         # Second pass: Identify leaf functions
         for function_node in function_definitions:
             name_node = function_node.child_by_field_name("name")
             current_function_name = self._node_text(name_node, code) if name_node else ""
 
+            if current_function_name.startswith("__"):
+                continue
+                
             # Check for a function body
             body_node = function_node.child_by_field_name("body")
             if not body_node:
@@ -100,13 +159,24 @@ class PythonCode(ProgramCode):
                 logger.debug(f"Skipping {current_function_name} due to non-basic arguments")
                 continue # Not a leaf function if arguments are not basic
 
+            # Check for @staticmethod decorator
+            is_static_method = False
+            if function_node.parent and function_node.parent.type == 'decorated_definition':
+                for child in function_node.parent.children:
+                    if child.type == 'decorator':
+                        decorator_text = self._node_text(child, code)
+                        if decorator_text == '@staticmethod':
+                            is_static_method = True
+                            break
+
             # Check if the function is an instance method (has 'self' as first parameter)
             is_instance_method = False
-            params = self._get_function_parameters(function_node, code)
-            if params:
-                first_param_name_node = params[0].child_by_field_name("name")
-                if first_param_name_node and self._node_text(first_param_name_node, code) == "self":
-                    is_instance_method = True
+            if not is_static_method:
+                params = self._get_function_parameters(function_node, code)
+                if params:
+                    first_param_name_node = params[0].child_by_field_name("name")
+                    if first_param_name_node and self._node_text(first_param_name_node, code) == "self":
+                        is_instance_method = True
             
             if is_instance_method:
                 logger.debug(f"Skipping {current_function_name} because it is an instance method")

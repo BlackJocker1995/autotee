@@ -4,6 +4,7 @@ from loguru import logger
 
 from LLM.llmodel import LLMConfig
 from task.java.java_test_workflow import JavaTestWorkflow
+from task.python.python_test_workflow import PythonTestWorkflow
 
 
 def run_create_test_workflow(
