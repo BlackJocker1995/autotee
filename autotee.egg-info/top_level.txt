@@ -1,6 +1,0 @@
-LLM
-analyzers
-static
-task
-tests
-utils

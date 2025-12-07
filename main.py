@@ -25,8 +25,8 @@ def main():
     """
     # nucypher
     # cryptomator hashids-java java-opentimestamps JustAuth Zero-Allocation-Hashing
-    language = "java"  # Language for the project (hardcoded for Java)
-    project_name = "/home/rdhan/data/dataset/test/starlarky"
+    language = "python"  # Language for the project (hardcoded for Java)
+    project_name = "/home/rdhan/data/dataset/test/argon2-cffi"
 
     # Configuration for each task specifying their parameters
     task_configs = {

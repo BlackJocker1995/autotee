@@ -27,6 +27,7 @@ class ProgramCode(object):
         """Initialize ProgramCode with default values."""
         self.match_pattern: str = ""
         self.file_exec: str = ""
+        self.language_name: str = ""
         self.parser: Optional[Parser] = None
         self.language_module: Any = None
 
@@ -129,7 +130,7 @@ class ProgramCode(object):
             try:
                 with open(file_path, 'r', encoding=encoding) as file:
                     texts = file.read()
-                    lang_name = self.file_exec.lower()
+                    lang_name = self.language_name.lower()
                     root_node = self.parse(texts, lang_name)
                     match_result = self.match_leaf_block(file_path, texts, root_node, lang_name)
                     return match_result if match_result is not None else []

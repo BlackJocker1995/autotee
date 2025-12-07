@@ -30,6 +30,7 @@ class JavaCode(ProgramCode):
     def __init__(self) -> None:
         super().__init__()
         self.file_exec = "java"
+        self.language_name = "java"
         
     def match_leaf_block(self, file_path: str, code: str, root_node: Node, lang_name: str) -> List[Dict[str, Any]]:
         if lang_name != "java":

@@ -42,10 +42,9 @@ def run_create_test_workflow(
         workflow = None
         if language.lower() == "java":
             workflow = JavaTestWorkflow(project_path, language, llm_config, code_hash)
-        # Add other languages here, e.g., Python
-        # elif language.lower() == "python":
-        #     # workflow = PythonTestWorkflow(project_path, language, llm_config, code_hash)
-        #     pass
+        elif language.lower() == "python":
+            workflow = PythonTestWorkflow(project_path, language, llm_config, code_hash)
+            pass
         else:
             logger.error(f"Unsupported language for test generation: {language}")
             continue

@@ -39,6 +39,7 @@ class PythonCode(ProgramCode):
     def __init__(self) -> None:
         super().__init__()
         self.file_exec = "py"
+        self.language_name = "python"
 
         
     def match_leaf_block(self, file_path: str, code: str, root_node: Node, lang_name: str) -> List[Dict[str, Any]]:
@@ -88,6 +89,10 @@ class PythonCode(ProgramCode):
                 # For Python, type hints are in 'type' child of 'parameter' node
                 type_node = param_node.child_by_field_name("type")
                 if type_node and not self._is_basic_python_type(type_node, code):
+                    type_text = self._node_text(type_node, code)
+                    logger.info(f"Skipping '{current_function_name}': Non-basic argument type '{type_text}'.")
+                    is_basic_args = False
+                    break
                     is_basic_args = False
                     break
             
