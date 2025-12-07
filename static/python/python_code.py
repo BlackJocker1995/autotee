@@ -1,5 +1,5 @@
 import re
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from loguru import logger
 from tree_sitter import Node
 
@@ -42,7 +42,7 @@ class PythonCode(ProgramCode):
         self.language_name = "python"
 
         
-    def ast_code_from_files(self, files: List[str]) -> List[Dict[str, Any]]:
+    def ast_code_from_files(self, file_paths: List[str]) -> List[Dict[str, Any]]:
         """
         Extracts AST code blocks from a list of files.
         This overridden version first scans all files to gather all function names,
@@ -58,7 +58,7 @@ class PythonCode(ProgramCode):
         file_trees = {}
 
         # First pass: Parse all files and collect all function names
-        for file_path in files:
+        for file_path in file_paths:
             try:
                 with open(file_path, 'r', encoding='utf-8') as file:
                     code = file.read()
@@ -83,7 +83,7 @@ class PythonCode(ProgramCode):
 
         # Second pass: Find leaf functions in each file
         all_code_blocks = []
-        for file_path in files:
+        for file_path in file_paths:
             if file_path in file_trees:
                 try:
                     code = file_contents[file_path]
@@ -97,7 +97,7 @@ class PythonCode(ProgramCode):
         return all_code_blocks
 
         
-    def match_leaf_block(self, file_path: str, code: str, root_node: Node, lang_name: str, function_names: set = None) -> List[Dict[str, Any]]:
+    def match_leaf_block(self, file_path: str, code: str, root_node: Node, lang_name: str, function_names: Optional[set] = None) -> List[Dict[str, Any]]:
         if lang_name != "python":
             return []
 
