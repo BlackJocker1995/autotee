@@ -36,8 +36,9 @@ class SensitiveStatementItem(BaseModel):
         "Serialization",
         "Deserialization",
     ]
-    statements: List[str] = Field(
-        description="List of code statements for the given sensitive type."
+    statements: Optional[List[str]] = Field(
+        default_factory=list,
+        description="List of code statements for the given sensitive type.",
     )
 
 
@@ -52,7 +53,10 @@ class SensitiveStatement(BaseModel):
     )
 
 
-class Bool(BaseModel):
+class QuestionBool(BaseModel):
     """Boolean answer."""
 
-    answer: bool
+    answer: bool = Field(
+        default=False, description="true if the answer is yes, false otherwise"
+    )
+

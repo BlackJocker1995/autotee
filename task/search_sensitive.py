@@ -1,16 +1,20 @@
+import json
 import os
+import re
 import sys
+from typing import Optional, Type
 
-from langchain_core.callbacks.base import BaseCallbackHandler
-from langchain_core.outputs import LLMResult
+from langchain_core.messages import AIMessage
 from loguru import logger
+from pydantic import BaseModel, ValidationError
 from tqdm import tqdm
 
 from LLM.llmodel import LLMConfig, LLModel
-from LLM.output import Bool, SensitiveStatement, SensitiveType
+from LLM.output import QuestionBool, SensitiveStatement, SensitiveType
 from static.projectUtil import read_code_block, save_code_block
+from utils.log_utils import logger, tqdm_logger
 
-BLOCK_SIZE_LIMIT = 10240
+BLOCK_SIZE_LIMIT = 5120
 LLM_SYSTEM_PROMPT = """You are an expert in code security and TEE (Trusted Execution Environment).
 Your task is to identify "leaf functions" that are suitable for porting to a TEE.
 
@@ -19,73 +23,75 @@ A "leaf function" has the following properties:
 2.  **Basic Arguments:** Its argument types are primitive data types (e.g., integers, floating-point numbers) or basic composite structures (e.g., arrays and strings).
 3.  **No instance context:** It should not rely on instance variables (e.g., using `this` or `self`).
 """
-INPUT_NAME_PREFIX = "java_leaf"
+
 OUTPUT_NAME_SUFFIX = "_sen"
 
-# 配置 loguru：禁止它捕获 print/tqdm 的 stderr（避免重复或干扰）
-logger.remove()  # 清除默认 handler
-logger.add(
-    sys.stdout,
-    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-)
+SENSITIVE_CATEGORIES = "Specifically, cryptography includes [Encryption, Decryption, Signature, Verification, Hash, Seed, Random]; serialization includes [Serialization, Deserialization]."
+
+# Prompts
+def get_check_sensitive_prompt(block: str) -> str:
+    return (
+        "Does this function utilize or implement any operations related to [cryptography, serialization]? "
+        f"{SENSITIVE_CATEGORIES}"
+        f"``` {block} ```"
+        'Your answer must be in a JSON format like `{"answer": true}` or `{"answer": false}`.'
+    )
+
+def get_sensitive_type_prompt(block: str) -> str:
+    return (
+        "Which specific subcategories type is it involve in? "
+        f"{SENSITIVE_CATEGORIES}"
+        f"``` {block} ```"
+        'Your answer must be in a JSON format like `{"type_list": ["Type1", "Type2"]}`.'
+    )
+
+def get_sensitive_statements_prompt(block: str, sensitive_types: list[str]) -> str:
+    return (
+        f"List the code statements that involved in {sensitive_types}: "
+        f"{SENSITIVE_CATEGORIES}"
+        f"``` {block} ```"
+        'Your answer must be in a JSON format like `{"statements": [{"type": "Type1", "statements": ["statement1", "statement2"]}]}`.'
+    )
 
 
-# 自定义一个适配器：让 tqdm.write() → logger.info()
-class TqdmToLogger:
-    def __init__(self, logger, level="INFO"):
-        self.logger = logger
-        self.level = level
-
-    def write(self, buf):
-        buf = buf.strip()
-        if buf:
-            self.logger.opt(depth=1).log(self.level, buf)
-
-    def flush(self):
-        pass  # logger 自动 flush
 
 
-# 创建适配器实例
-tqdm_logger = TqdmToLogger(logger, level="INFO")
 
+def _invoke_llm_chat(
+    agent: LLModel, prompt: str, output_format: Optional[Type[BaseModel]] = None
+):
+    # Create a chat with structured output if format is provided
+    chat = agent.create_stateless_chat(
+        system_prompt=LLM_SYSTEM_PROMPT, output_format=output_format
+    )
 
-class TokenUsageCallback(BaseCallbackHandler):
-    def __init__(self, agent: LLModel):
-        self.agent = agent
+    result = chat.invoke({"messages": [{"role": "user", "content": prompt}]})
 
-    def on_llm_end(self, response: LLMResult, **kwargs) -> None:
-        if response.llm_output and "token_usage" in response.llm_output:
-            token_usage = response.llm_output["token_usage"]
-            input_tokens = token_usage.get("prompt_tokens", 0)
-            completion_tokens = token_usage.get("completion_tokens", 0)
-            self.agent.total_input_tokens += input_tokens
-            self.agent.total_completion_tokens += completion_tokens
-            logger.debug(
-                f"Token usage for current invoke: Input={input_tokens}, Completion={completion_tokens}. "
-                f"Total: Input={self.agent.total_input_tokens}, Completion={self.agent.total_completion_tokens}"
-            )
+    # Manually extract token usage from the AIMessage
+    if "messages" in result:
+        for message in result["messages"]:
+            if isinstance(message, AIMessage) and hasattr(message, "usage_metadata") and message.usage_metadata:
+                input_tokens = message.usage_metadata.get("input_tokens", 0)
+                completion_tokens = message.usage_metadata.get("output_tokens", 0)
+                agent.total_input_tokens += input_tokens
+                agent.total_completion_tokens += completion_tokens
+                logger.debug(
+                    f"Token usage for current invoke: Input={input_tokens}, Completion={completion_tokens}. "
+                    f"Total: Input={agent.total_input_tokens}, Completion={agent.total_completion_tokens}"
+                )
+                break  # Assumes one AIMessage with usage info per call
 
+    if "structured_response" in result:
+        return result["structured_response"]
+    
+    return None 
 
-def _invoke_llm_chat(agent: LLModel, prompt: str, output_format=None):
-    if output_format:
-        chat = agent.create_stateless_chat(
-            system_prompt=LLM_SYSTEM_PROMPT, output_format=output_format
-        )
-    else:
-        chat = agent.create_stateless_chat(system_prompt=LLM_SYSTEM_PROMPT)
-
-    # Instantiate and use the callback for this invocation
-    token_callback = TokenUsageCallback(agent)
-    result = chat.invoke({"input": prompt}, config={"callbacks": [token_callback]})
-
-    print(result)
-    return result
 
 
 def query_sensitive_project(
     project_path: str, language: str, llm_config: LLMConfig
 ) -> None:
-    agent = LLModel.from_config(llm_config)
+    
     in_name = f"{language}_leaf"
     out_name = f"{llm_config.get_description()}{OUTPUT_NAME_SUFFIX}"
 
@@ -96,87 +102,79 @@ def query_sensitive_project(
     processed_blocks = 0
 
     for code in tqdm(codes, desc="Processing", unit="item", mininterval=1):
-        # Store token counts before processing this code block
-        start_input_tokens = agent.total_input_tokens
-        start_completion_tokens = agent.total_completion_tokens
+        try:
+            agent = LLModel.from_config(llm_config)
+            # Store token counts before processing this code block
+            start_input_tokens = agent.total_input_tokens
+            start_completion_tokens = agent.total_completion_tokens
 
-        block = code["code"]
+            block = code["code"]
 
-        if len(block) > BLOCK_SIZE_LIMIT:
-            logger.debug("Over size, skip...")
+            if len(block) > BLOCK_SIZE_LIMIT:
+                logger.debug("Over size, skip...")
+                continue
+
+            processed_blocks += 1
+            # First question
+            prompt1 = get_check_sensitive_prompt(block)
+            result1_obj = _invoke_llm_chat(
+                agent,
+                prompt1,
+                output_format=QuestionBool,
+            )
+            # Convert string to boolean
+            result1 = result1_obj.answer if result1_obj else False
+
+            if not result1: # The condition now directly uses the boolean result1
+                continue
+
+            # Second question
+            prompt2 = get_sensitive_type_prompt(block)
+            result2 = _invoke_llm_chat(
+                agent,
+                prompt2,
+                output_format=SensitiveType,
+            )
+            if not result2 or not result2.type_list:
+                continue
+
+            sensitive_types = list(set(result2.type_list))
+
+            # Third question
+            prompt3 = get_sensitive_statements_prompt(block, sensitive_types)
+            result3 = _invoke_llm_chat(
+                agent,
+                prompt3,
+                output_format=SensitiveStatement,
+            )
+
+            if not result3 or not result3.statements:
+                continue
+
+            # If all three questions pass, retain the item and add the new attributes
+
+            code["sensitive_check"] = result1
+            code["sensitive_type"] = sensitive_types
+            statements_dict = {item.type: item.statements for item in result3.statements}
+            code["sensitive_statements"] = statements_dict
+            logger.info(
+                f"All sensitive checks passed and statements extracted for function. Sensitive check result: {code}"
+            )
+            out.append(code)
+
+            # Calculate and log token usage for this session
+            session_input_tokens = agent.total_input_tokens - start_input_tokens
+            session_completion_tokens = (
+                agent.total_completion_tokens - start_completion_tokens
+            )
+            logger.info(
+                f"Session token usage for code block: Input={session_input_tokens}, "
+                f"Completion={session_completion_tokens}, "
+                f"Total={session_input_tokens + session_completion_tokens}"
+            )
+        except Exception as e:
+            logger.error(f"Error processing code block: {e}")
             continue
-
-        processed_blocks += 1
-        # First question
-        result1 = _invoke_llm_chat(
-            agent,
-            "Does this function utilize or implement any operations related to [cryptography, serialization]? Specifically, cryptography includes [Encryption, Decryption, Signature, Verification, Hash, Seed, Random]; serialization includes [Serialization, Deserialization]"
-            + f"``` {block} ```",
-            output_format=Bool,
-        )
-        if not result1 or not getattr(result1, "answer"):
-            continue
-
-        # Second question
-        result2 = _invoke_llm_chat(
-            agent,
-            "Which specific subcategories type is it involve in?"
-            + f"``` {block} ```  Specifically, cryptography includes [Encryption, Decryption, Signature, Verification, Hash, Seed, Random]; serialization includes [Serialization, Deserialization]",
-            output_format=SensitiveType,
-        )
-        if not result2 or not result2.type_list:
-            continue
-
-        sensitive_types = list(set(result2.type_list))
-
-        # Third question
-        result3 = _invoke_llm_chat(
-            agent,
-            f"List the code statements that involved in {sensitive_types}:"
-            + f"``` {block} ```  Specifically, cryptography includes [Encryption, Decryption, Signature, Verification, Hash, Seed, Random]; serialization includes [Serialization, Deserialization]",
-            output_format=SensitiveStatement,
-        )
-
-        if not result3 or not result3.statements:
-            continue
-
-        # If all three questions pass, retain the item and add the new attributes
-
-        code["sensitive_check"] = result1.answer
-        code["sensitive_type"] = sensitive_types
-        statements_dict = {item.type: item.statements for item in result3.statements}
-        code["sensitive_statements"] = statements_dict
-        logger.info(
-            f"All sensitive checks passed and statements extracted for function. Sensitive check result: {code}"
-        )
-        out.append(code)
-
-        # Calculate and log token usage for this session
-        session_input_tokens = agent.total_input_tokens - start_input_tokens
-        session_completion_tokens = (
-            agent.total_completion_tokens - start_completion_tokens
-        )
-        logger.info(
-            f"Session token usage for code block: Input={session_input_tokens}, "
-            f"Completion={session_completion_tokens}, "
-            f"Total={session_input_tokens + session_completion_tokens}"
-        )
-
-    if processed_blocks > 0:
-        avg_input_tokens = agent.total_input_tokens / processed_blocks
-        avg_completion_tokens = agent.total_completion_tokens / processed_blocks
-        avg_total_tokens = (
-            agent.total_input_tokens + agent.total_completion_tokens
-        ) / processed_blocks
-        logger.info(f"Average Input Tokens per block: {avg_input_tokens:.2f}")
-        logger.info(f"Average Completion Tokens per block: {avg_completion_tokens:.2f}")
-        logger.info(f"Average Total Tokens per block: {avg_total_tokens:.2f}")
-
-    logger.info(f"Total Input Tokens: {agent.total_input_tokens}")
-    logger.info(f"Total Completion Tokens: {agent.total_completion_tokens}")
-    logger.info(
-        f"Total Combined Tokens: {agent.total_input_tokens + agent.total_completion_tokens}"
-    )
 
     output_dir = os.path.join(project_path, "ana_json")
     if not os.path.exists(output_dir):

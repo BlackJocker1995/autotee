@@ -23,6 +23,7 @@ def main():
 
     Usage: python main.py <task>
     """
+    # nucypher
     # cryptomator hashids-java java-opentimestamps JustAuth Zero-Allocation-Hashing
     language = "java"  # Language for the project (hardcoded for Java)
     project_name = "/home/rdhan/data/dataset/test/starlarky"
@@ -32,7 +33,7 @@ def main():
         "leaf": {"func": run_processing, "params": {}},
         "sensitive": {
             "func": query_sensitive_project,
-            "params": {"llm_config": LLMConfig(provider="sglang", model="G P")},
+            "params": {"llm_config": LLMConfig(provider="vllm", model="Qwen3-coder:30b")},
         },
         "write": {
             "func": write_sen2file,
@@ -42,7 +43,7 @@ def main():
         },
         "test": {
             "func": run_create_test_workflow,
-            "params": {"llm_config": LLMConfig(provider="openai", model="gpt-4o")},
+            "params": {"llm_config": LLMConfig(provider="vllm", model="Qwen3-coder:30b")},
         },
         "transform": {
             "func": run_transform_workflow,

@@ -1,60 +1,21 @@
 import os
 from LLM.llmodel import LLMConfig
-from task.search_sensitive import query_sensitive_project, OUTPUT_NAME_SUFFIX
-from static.projectUtil import read_code_block, save_code_block, short_hash
+from task.search_sensitive import OUTPUT_NAME_SUFFIX
+from static.projectUtil import read_code_block
 from loguru import logger
+from task.java.java_write_fun2file import JavaWriter
+from task.python.python_write_fun2file import PythonWriter
 
 def write_sensitive_code_to_files(project_path: str, language: str, sensitive_code_blocks: list[dict]) -> None:
-    """
-    Writes sensitive code blocks to individual files in a designated directory.
-    Each code block is placed in a subfolder named by its hash, and for Java,
-    it's wrapped in a class with a matching filename.
-    """
-    project_code_files_dir = os.path.join(project_path, "project_code_files")
-    os.makedirs(project_code_files_dir, exist_ok=True)
-    logger.info(f"Created output directory for sensitive code files: {project_code_files_dir}")
-
-    for i, code_block in enumerate(sensitive_code_blocks):
-        code_content = code_block.get("code", "")
-        function_name = code_block.get("function_name", f"unknown_func_{i}")
-        
-        # Generate a hash for the code content to create a unique subdirectory
-        code_hash = short_hash(code_content)
-        hash_subdir = os.path.join(project_code_files_dir, code_hash)
-        os.makedirs(hash_subdir, exist_ok=True)
-
-        if language == "java":
-            # Use "SensitiveFun" as the base class name, or derive from function_name if available and not a placeholder
-            base_class_name = "SensitiveFun"
-            if function_name and not function_name.startswith("unknown_func_"):
-                base_class_name = function_name[0].upper() + function_name[1:]
-            
-            class_name = base_class_name
-            output_file_name = f"{class_name}.java"
-            
-            # Define Maven standard directory structure for main Java files
-            java_main_dir = os.path.join(hash_subdir, "src", "main", "java", "com", "example", "project")
-            os.makedirs(java_main_dir, exist_ok=True)
-            
-            output_file_path = os.path.join(java_main_dir, output_file_name)
-
-            # Wrap the function code in a class with package declaration
-            wrapped_code_content = f"""package com.example.project;
-            public class {class_name} {{
-                {code_content}
-            }}
-            """
-            with open(output_file_path, "w", encoding="utf-8") as f:
-                f.write(wrapped_code_content)
-            logger.info(f"Written sensitive Java class to: {output_file_path}")
-        elif language == "python":
-            # For Python, save the function code as a .py file
-            output_file_name = f"{function_name}.py"
-            output_file_path = os.path.join(hash_subdir, output_file_name)
-            with open(output_file_path, "w", encoding="utf-8") as f:
-                f.write(code_content)
-            logger.info(f"Written sensitive Python function to: {output_file_path}")
-    logger.info("Finished writing sensitive code blocks to individual files.")
+    if language == "java":
+        writer = JavaWriter(project_path, sensitive_code_blocks)
+    elif language == "python":
+        writer = PythonWriter(project_path, sensitive_code_blocks)
+    else:
+        logger.error(f"Unsupported language for writing sensitive code: {language}")
+        return
+    
+    writer.write_sensitive_code_to_files()
 
 
 def write_sen2file(project_path: str, language: str, llm_config: LLMConfig) -> None:
@@ -74,4 +35,3 @@ def write_sen2file(project_path: str, language: str, llm_config: LLMConfig) -> N
         sensitive_code_blocks = []
 
     write_sensitive_code_to_files(project_path, language, sensitive_code_blocks)
-

@@ -1,3 +1,4 @@
+import json
 import os
 from abc import ABC
 from typing import Optional, Type
@@ -225,16 +226,18 @@ class LLModel(ABC):
         # Use the provided system prompt or the instance's default
         current_prompt = system_prompt if system_prompt else self.system_prompt
 
-        prompt = ChatPromptTemplate.from_messages(
-            [SystemMessage(content=current_prompt), ("human", "{input}")]
-        )
-
         if output_format:
-            out = prompt | self.llm.with_structured_output(output_format)
+            return create_agent(
+                self.llm,
+                tools=[],
+                response_format=output_format,
+                system_prompt=current_prompt, # Use the modified prompt
+            )
         else:
-            out = prompt | self.llm
-
-        return out
+            prompt = ChatPromptTemplate.from_messages(
+                [SystemMessage(content=current_prompt), ("human", "{input}")]
+            )
+            return prompt | self.llm
 
     def create_tool_react(self, tools: list, system_prompt: str) -> Runnable:
         """

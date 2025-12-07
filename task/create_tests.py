@@ -2,11 +2,8 @@ import os
 
 from loguru import logger
 
-from LLM.llmodel import LLMConfig, LLModel
-from LLM.states.task_states import TestGenTaskState
-from LLM.tasks_tool_creater import create_test_gen_tools
-from utils.chunk_utils import extract_token_usage, process_chunk
-from utils.maven_utils import get_java_pom_template
+from LLM.llmodel import LLMConfig
+from task.java.java_test_workflow import JavaTestWorkflow
 
 
 def run_create_test_workflow(
@@ -14,20 +11,11 @@ def run_create_test_workflow(
 ) -> None:
     """
     Orchestrates the workflow for generating test files for sensitive code blocks.
-    This function is currently designed to only handle Java projects.
-
-    This is an abstract solution outlining the steps:
-    1. Read sensitive code blocks from previously processed project data.
-    2. For each code block (identified by its hash), create a new Test.py file.
-    3. (Abstract) Use an LLM in a React-like loop to generate test inputs and ensure the sub-project runs.
+    This function delegates the test creation process to a language-specific workflow.
     """
-    logger.info("Starting the create test workflow.")
+    logger.info(f"Starting the create test workflow for {language}.")
 
-    # Define the directory where individual code files were saved
     project_code_files_dir = os.path.join(project_path, "project_code_files")
-
-    # Iterate through the project_code_files directory to find code blocks
-    # Each subdirectory in project_code_files_dir represents a code block identified by its hash
 
     if not os.path.exists(project_code_files_dir):
         logger.warning(
@@ -49,96 +37,20 @@ def run_create_test_workflow(
 
     logger.info(f"Found {len(code_block_hashes)} code blocks for test generation.")
 
-    for i, code_hash in enumerate(code_block_hashes):
-        hash_subdir = os.path.join(project_code_files_dir, code_hash)
+    for code_hash in code_block_hashes:
+        logger.info(f"Processing code block: {code_hash}")
+        workflow = None
+        if language.lower() == "java":
+            workflow = JavaTestWorkflow(project_path, language, llm_config, code_hash)
+        # Add other languages here, e.g., Python
+        # elif language.lower() == "python":
+        #     # workflow = PythonTestWorkflow(project_path, language, llm_config, code_hash)
+        #     pass
+        else:
+            logger.error(f"Unsupported language for test generation: {language}")
+            continue
 
-        # Define Maven standard directory structure
-        java_main_dir = os.path.join(
-            hash_subdir, "src", "main", "java", "com", "example", "project"
-        )
-        java_test_dir = os.path.join(
-            hash_subdir, "src", "test", "java", "com", "example", "project"
-        )
+        if workflow:
+            workflow.run()
 
-        # Ensure Maven directories exist
-        os.makedirs(java_main_dir, exist_ok=True)
-        os.makedirs(java_test_dir, exist_ok=True)
-
-        # source_code_file = "SensitiveFun.java"
-        # original_code_file_path = os.path.join(java_main_dir, source_code_file)
-
-        # For Java, create a Test.java file
-        test_file_name = "SensitiveFunTest.java"
-        test_file_path = os.path.join(java_test_dir, test_file_name)
-
-        # Create an empty Test.java file in the correct Maven test directory
-        with open(test_file_path, "w", encoding="utf-8") as f:
-            f.write("")  # Create an empty file
-        logger.info(f"Created empty test file: {test_file_path}")
-
-        # Get pom.xml template content and replace artifactId
-        pom_content = get_java_pom_template()
-        pom_content = pom_content.replace("REPLACE_ME_ARTIFACT_ID", code_hash)
-
-        pom_file_path = os.path.join(hash_subdir, "pom.xml")
-        with open(pom_file_path, "w", encoding="utf-8") as f:
-            f.write(pom_content)
-        logger.info(f"Created pom.xml for Maven project at: {pom_file_path}")
-
-        task_state = TestGenTaskState()
-        created_tools = create_test_gen_tools(
-            project_root_path=hash_subdir, language=language, task_state=task_state
-        )
-
-        # Create LLM agent with the tools
-        system_prompt = (
-            "You are an autonomous Java build-and-test engineer. "
-            "You can run tools to build, test, and modify the codebase."
-            "Follow the user's constraints strictly and do not attempt to ask the user questions.\n"
-            "{agent_scratchpad}"
-        )
-        llm = LLModel.from_config(llm_config)  # Instantiate LLModel
-        agent_executor = llm.create_tool_react(created_tools, system_prompt)
-
-        initial_input = {
-            "messages": [
-                (
-                    "user",
-                    f"""
-        Generate a diverse set of test inputs for  {language} project located at `{hash_subdir}`, aiming to maximize both line and branch coverage.
-        Enhance the unit test coverage (line and branch) for the specified code unit.
-        Ensure generated tests are syntactically correct, invoke relevant methods with appropriate inputs, and include assertions to validate expected behavior.
-        If the added unit tests do not increase coverage, they will not be kept. The generated tests can only be assertEquals and assertThrows, and assertThrows can only be Exception.class
-
-        **Completion Criteria:** You have successfully completed this task only when both of the following conditions are met:
-        1. The task concludes after three consecutive attempts show no improvement in line and branch coverage.
-        2. Test.java is not empty.
-        3. All unit tests execute successfully, reporting 'Failures: 0, Errors: 0, Skipped: 0'
-
-        """,
-                )
-            ]
-        }
-
-        # Run
-        total_all_tokens = 0
-        token_usage_steps = 0  # Initialize counter for steps with token usage
-        token_usage_steps = 0  # Initialize counter for steps with token usage
-        for chunk in agent_executor.stream(
-            initial_input, config={"recursion_limit": 150}
-        ):
-            current_chunk_tokens = extract_token_usage(chunk)
-            total_all_tokens += current_chunk_tokens
-            if current_chunk_tokens > 0:
-                logger.info(f"Token usage for this step: {current_chunk_tokens}")
-                token_usage_steps += 1  # Increment counter if tokens were used
-
-            process_chunk(chunk)
-
-            if task_state.is_success():
-                logger.success(
-                    "All tasks passed (tests and coverage). Stopping execution."
-                )
-                break
-
-    logger.info("Finished abstract test creation workflow.")
+    logger.info("Finished create test workflow.")
