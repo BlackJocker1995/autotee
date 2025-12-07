@@ -51,7 +51,7 @@ class PythonTestWorkflow(BaseTestWorkflow):
         prompt = f"""You are a professional Python development engineer. Your core task is to write a set of unit tests using pytest for the specified functions in a single file.
 
         **Target Functions**
-        - **Functions Location**: `{self.project_path}/sensitive_fun.py`
+        - **Functions Location**: `{code_to_test_path}`
 
         **Project Context**
         - The functions to be tested are located in `{test_file_path}`.
