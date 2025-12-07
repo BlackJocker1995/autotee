@@ -14,3 +14,4 @@ file
 metric
 unittest/
 tokenfile
+*__pycache__

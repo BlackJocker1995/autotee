@@ -27,7 +27,7 @@ In this project, we introduce AutoTEE, an automated approach that adapts existin
     ```bash
     curl -LsSf https://astral.sh/uv/install.sh | sh
     ```
-    `uv` will automatically manage the virtual environment and dependencies from `requirements.txt`.
+    `uv` will automatically manage the virtual environment and dependencies from `pyproject.toml`.
 
 ## Configuration
 
@@ -50,6 +50,33 @@ To use LLM providers that require an API key (like OpenAI, Google, DeepSeek), yo
     ```
     OPENAI=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
     ```
+
+### Local LLM Server Configuration (vLLM, SGLang, Ollama)
+
+For local LLM servers like vLLM, SGLang, and Ollama, the base URLs are configured within the `LLM/llmodel.py` file. If your local server is running on a different address or port, you may need to modify the `_provider_base_urls` dictionary in `LLM/llmodel.py` to match your setup.
+
+**Example for vLLM in `LLM/llmodel.py`:**
+
+```python
+_provider_base_urls = {
+    # ... other providers
+    "vllm": "http://your-vllm-server-address:port/v1",
+    "sglang": "http://your-sglang-server-address:port/v1",
+    "ollama": "http://your-ollama-server-address:port",
+}
+```
+
+## Supported LLMs
+
+This project supports the following LLM providers:
+
+-   **OpenAI**: Models from OpenAI (e.g., GPT-3.5, GPT-4).
+-   **Qwen**: Tongyi Qwen models from Alibaba Cloud.
+-   **DeepSeek**: Models from DeepSeek.
+-   **Google**: Generative models from Google (e.g., Gemini).
+-   **Ollama**: Run local models using Ollama.
+-   **vLLM**: Run local models with vLLM OpenAI-compatible server.
+-   **SGLang**: Run local models with SGLang OpenAI-compatible server.
 
 ## Usage
 

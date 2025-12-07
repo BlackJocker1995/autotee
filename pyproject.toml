@@ -1,0 +1,33 @@
+[project]
+name = "autotee"
+version = "0.1.0"
+description = "A project to automatically write tests."
+dependencies = [
+    "Jinja2",
+    "beautifulsoup4",
+    "graphviz",
+    "langchain",
+    "langchain-community",
+    "langchain-core",
+    "langchain-deepseek",
+    "langchain-google-genai",
+    "langchain-ollama",
+    "langchain-openai",
+    "langgraph",
+    "loguru",
+    "pexpect",
+    "pydantic",
+    "pydantic-settings",
+    "python-dotenv",
+    "requests",
+    "tqdm",
+    "tree-sitter",
+    "tree-sitter-java",
+    "tree-sitter-python",
+    "unidiff",
+    "toml",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
