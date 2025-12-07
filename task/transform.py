@@ -1,5 +1,7 @@
 import os
+
 from LLM.llmodel import LLMConfig, LLModel
+from LLM.states.task_states import ConvertTaskState
 from LLM.tasks_tool_creater import create_transform_tools
 from LLM.tools.cargo_tool import cargo_new
 from loguru import logger
@@ -76,9 +78,11 @@ def run_transform_workflow(project_path: str, language: str, llm_config: LLMConf
         with open(java_main_file) as f:
             source_code = f.read()
 
+        task_state = ConvertTaskState()
         created_tools = create_transform_tools(
             project_root_path=hash_subdir,
             language=language,
+            task_state=task_state
         )
 
         # Create LLM agent with the tools
@@ -96,16 +100,22 @@ def run_transform_workflow(project_path: str, language: str, llm_config: LLMConf
          # Run
         total_all_tokens = 0
         token_usage_steps = 0 # Initialize counter for steps with token usage
-        for chunk in agent_executor.stream(initial_input, config={"recursion_limit": 150}):
-            current_chunk_tokens = extract_token_usage(chunk)
-            total_all_tokens += current_chunk_tokens
-            if current_chunk_tokens > 0:
-                logger.info(f"Token usage for this step: {current_chunk_tokens}")
-                token_usage_steps += 1 # Increment counter if tokens were used
+        try:
+            for chunk in agent_executor.stream(initial_input, config={"recursion_limit": 150}):
+                current_chunk_tokens = extract_token_usage(chunk)
+                total_all_tokens += current_chunk_tokens
+                if current_chunk_tokens > 0:
+                    logger.info(f"Token usage for this step: {current_chunk_tokens}")
+                    token_usage_steps += 1 # Increment counter if tokens were used
 
-            bool_result, _ = process_chunk(chunk)
-            if bool_result:
-                break
+                bool_result, _ = process_chunk(chunk)
+                if bool_result:
+                    break
+            else:
+                logger.error(f"The transformation task for {code_hash} failed because the agent stream ended prematurely without successful completion (possibly hit recursion limit).")
+
+        except Exception as e:
+            logger.error(f"The transformation task for {code_hash} failed due to an exception: {e}")
 
         logger.info(f"Total tokens for the workflow: {total_all_tokens}")
         if token_usage_steps > 0:

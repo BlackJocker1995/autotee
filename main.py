@@ -6,13 +6,13 @@ related to project analysis, testing, and database operations.
 """
 
 import sys
+
 from loguru import logger
 
 from LLM.llmodel import LLMConfig
-
+from task.create_tests import run_create_test_workflow
 from task.match_block_common import run_processing
 from task.search_sensitive import query_sensitive_project
-from task.create_tests import run_create_test_workflow
 from task.transform import run_transform_workflow
 from task.write_fun2file import write_sen2file
 
@@ -30,12 +30,26 @@ def main():
     # Configuration for each task specifying their parameters
     task_configs = {
         "leaf": {"func": run_processing, "params": {}},
-        "sensitive": {"func": query_sensitive_project, "params": {"llm_config": LLMConfig(provider='vllm', model='Qwen3-coder:30b')}},
-        "write": {"func": write_sen2file, "params": {"llm_config": LLMConfig(provider='vllm', model='Qwen3-coder:30b')}},
-        "test": {"func": run_create_test_workflow, "params": {"llm_config": LLMConfig(provider='vllm', model='Qwen3-coder:30b')}},
-        "transform": {"func": run_transform_workflow, "params": {"llm_config": LLMConfig(provider='vllm', model='Qwen3-coder:30b')}},
-
-
+        "sensitive": {
+            "func": query_sensitive_project,
+            "params": {"llm_config": LLMConfig(provider="sglang", model="G P")},
+        },
+        "write": {
+            "func": write_sen2file,
+            "params": {
+                "llm_config": LLMConfig(provider="vllm", model="Qwen3-coder:30b")
+            },
+        },
+        "test": {
+            "func": run_create_test_workflow,
+            "params": {"llm_config": LLMConfig(provider="openai", model="gpt-4o")},
+        },
+        "transform": {
+            "func": run_transform_workflow,
+            "params": {
+                "llm_config": LLMConfig(provider="vllm", model="Qwen3-coder:30b")
+            },
+        },
     }
     # Check if correct number of arguments provided
     if len(sys.argv) != 2:
@@ -54,14 +68,17 @@ def main():
             params = config["params"]
 
             # Execute function with all parameters
-            func(project_name,language, **params)
+            func(project_name, language, **params)
         finally:
             # Cleanup message - verify shared memory cleanup status
-            logger.info("Exiting main: Verify shared memory cleanup status. Any shared memory warnings should be monitored.")
+            logger.info(
+                "Exiting main: Verify shared memory cleanup status. Any shared memory warnings should be monitored."
+            )
     else:
         # Handle unknown task
         logger.warning(f"Unknown task: {task_name}")
         logger.info(f"Available tasks: {', '.join(task_configs.keys())}")
+
 
 if __name__ == "__main__":
     """

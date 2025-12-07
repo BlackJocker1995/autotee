@@ -7,15 +7,12 @@ from loguru import logger
 from typing import Any, Dict, List,Optional, Union
 import subprocess # Replace pexpect with subprocess
 from jinja2 import Environment, FileSystemLoader
+from LLM.states.task_states import TaskState
 from analyzers.python.python_analyzer import PythonCoverageAnalyzer
 from analyzers.java.jacoco_analyzer import JacocoAnalyzer
 from utils import file_utils
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
-
-
-
-finish_str = "[Terminate] Unit test passed. Terminate the current task immediately!"
 
 
 class MavenExecuteUnitTestTool(BaseTool):
@@ -29,10 +26,10 @@ class MavenExecuteUnitTestTool(BaseTool):
     '''
 
     project_root_path:str
-    is_end_point:bool
+    task_state: TaskState | None = None
 
-    def __init__(self, project_root_path: str, is_end_point: bool, **kwargs):
-        super().__init__(project_root_path = project_root_path, is_end_point = is_end_point, **kwargs)
+    def __init__(self, project_root_path: str, task_state: TaskState | None = None, **kwargs):
+        super().__init__(project_root_path = project_root_path, task_state = task_state, **kwargs)
 
     def _extract_error_lines(self, output: str, project_path: str) -> str:
             """Extract meaningful error lines from Maven output, filtering out helper messages."""
@@ -45,61 +42,82 @@ class MavenExecuteUnitTestTool(BaseTool):
             return "\n".join(error_lines) if error_lines else ""
 
     def _extract_success_message(self, output: str) -> str:
-        """Extract a success message from Maven output."""
-        build_success_match = re.search(r'\\[INFO\\] BUILD SUCCESS', output)
-        test_summary_match = re.search(r'Tests run:\\s*(\\d+),\\s*Failures:\\s*(\\d+),\\s*Errors:\\s*(\\d+),\\s*Skipped:\\s*(\\d+)', output)
+            """Extract a success message from Maven output."""
+            build_success_match = re.search(r"\\[INFO\\] BUILD SUCCESS", output)
+            test_summary_match = re.search(
+                r"Tests run:\\s*(\\d+),\\s*Failures:\\s*(\\d+),\\s*Errors:\\s*(\\d+),\\s*Skipped:\\s*(\\d+)",
+                output,
+            )
 
-        if build_success_match and test_summary_match:
-            groups = test_summary_match.groups()
-            return f"{finish_str} Summary: Tests run: {groups[0]}, Failures: {groups[1]}, Errors: {groups[2]}, Skipped: {groups[3]}"
-        elif build_success_match:
-            return finish_str
-        else:
-            simple_test_summary = re.search(r'Tests run:\\s*(\\d+)', output)
-            if simple_test_summary:
-                return f"{finish_str} Summary: Tests run: {simple_test_summary.group(1)}"
-            return ""
+            if build_success_match and test_summary_match:
+                groups = test_summary_match.groups()
+                return f"Summary: Tests run: {groups[0]}, Failures: {groups[1]}, Errors: {groups[2]}, Skipped: {groups[3]}"
+            elif build_success_match:
+                return "Successfully ran tests."
+            else:
+                simple_test_summary = re.search(r"Tests run:\\s*(\\d+)", output)
+                if simple_test_summary:
+                    return f"Summary: Tests run: {simple_test_summary.group(1)}"
+                return ""
 
 
     def _run(self) -> str:
-        command = "" # Initialize for exception handling
-        try:
-            command = 'mvn clean test'
-            logger.debug(f"Executing command: {command} in {self.project_root_path}")
+         command = ""  # Initialize for exception handling
+         try:
+             command = "mvn clean test"
+             logger.debug(f"Executing command: {command} in {self.project_root_path}")
 
-            process = subprocess.run(command, cwd=self.project_root_path, capture_output=True, text=True, shell=True, timeout=300)
-            output = process.stdout + "\n" + process.stderr # Combine stdout and stderr
-            exit_status = process.returncode
+             process = subprocess.run(
+                 command,
+                 cwd=self.project_root_path,
+                 capture_output=True,
+                 text=True,
+                 shell=True,
+                 timeout=300,
+             )
+             output = process.stdout + "\n" + process.stderr  # Combine stdout and stderr
+             exit_status = process.returncode
 
+             if output:
+                 ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+                 cleaned_output = ansi_escape.sub("", output)
 
-            if output:
-                ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-                cleaned_output = ansi_escape.sub('', output)
+                 error_lines = self._extract_error_lines(
+                     cleaned_output, self.project_root_path
+                 )
 
-                error_lines = self._extract_error_lines(cleaned_output, self.project_root_path)
+                 if error_lines:
+                     return f"Unit test execution finished with errors:\n{error_lines}"
+                 elif exit_status != 0:
+                     return f"Unit test execution failed (exit status {exit_status}). Check logs or full output for details."
+                 else:
+                     success_message = self._extract_success_message(cleaned_output)
+                     if success_message:
+                         if self.task_state:
+                             self.task_state.set_success("unit_test")
+                         return success_message
+                     else:
+                         if self.task_state:
+                             self.task_state.set_success("unit_test")
+                         return "Unit test pass. "
 
-                if error_lines:
-                    return f"Unit test execution finished with errors:\n{error_lines}"
-                elif exit_status != 0:
-                    return f"Unit test execution failed (exit status {exit_status}). Check logs or full output for details."
-                else:
-                    success_message = self._extract_success_message(cleaned_output)
-                    if success_message:
-                        return success_message
-                    else:
-                        return f"{finish_str}. Unit test pass. " if self.is_end_point else "Unit test pass. "
-
-            elif exit_status != 0:
+             elif exit_status != 0:
+                 if self.task_state:
+                     self.task_state.set_failed("unit_test")
                  err_output = process.stderr.strip()
                  return f"Unit test execution failed (exit status {exit_status}).{' Output: ' + err_output if err_output else ' No output.'}"
-            else:
-                return f"{finish_str}. (no significant output captured). " if self.is_end_point else "(no significant output captured)."
+             else:
+                 if self.task_state:
+                     self.task_state.set_success("unit_test")
+                 return "(no significant output captured)."
 
-        except subprocess.TimeoutExpired:
+         except subprocess.TimeoutExpired:
              logger.error(f"Command '{command}' timed out after 300 seconds.")
              return "Error: Command execution timed out."
-        except Exception as e:
-             logger.exception("An unexpected error occurred during Java unit test execution")
+         except Exception as e:
+             logger.exception(
+                 "An unexpected error occurred during Java unit test execution"
+             )
              return f"An unexpected error occurred during Java unit test execution: {e}"
 
 class JacocoCoverageReport(BaseModel):
@@ -117,6 +135,8 @@ class JacocCoverageTool(BaseTool):
     '''
 
     project_root_path:str
+    task_state: TaskState | None = None
+    coverage_history: List[List[float]] = Field(default_factory=list)
 
     def __init__(self, project_root_path: str, **kwargs):
         super().__init__(project_root_path = project_root_path, **kwargs)
@@ -133,44 +153,99 @@ class JacocCoverageTool(BaseTool):
         """
         try:
             # Construct and execute the Maven command to generate the JaCoCo report
-            command = 'mvn test jacoco:report'
+            command = "mvn clean test jacoco:report"
             logger.debug(f"Executing command: {command} in {self.project_root_path}")
             try:
                 # Run the Maven command. If it times out, a TimeoutExpired exception will be caught.
-                subprocess.run(command, cwd=self.project_root_path, capture_output=True, text=True, shell=True, timeout=300)
+                subprocess.run(
+                    command,
+                    cwd=self.project_root_path,
+                    capture_output=True,
+                    text=True,
+                    shell=True,
+                    timeout=300,
+                )
 
                 # Parse the JaCoCo report
-                csv_report_path = os.path.join(self.project_root_path, 'target', 'site','jacoco','jacoco.csv')
-                xml_report_path = os.path.join(self.project_root_path, 'target', 'site','jacoco','jacoco.xml')
+                csv_report_path = os.path.join(
+                    self.project_root_path, "target", "site", "jacoco", "jacoco.csv"
+                )
+                xml_report_path = os.path.join(
+                    self.project_root_path, "target", "site", "jacoco", "jacoco.xml"
+                )
                 if not os.path.exists(csv_report_path):
+                    if self.task_state:
+                        self.task_state.set_failed("coverage_pass")
                     return "JaCoCo CSV report not found. May be code is not correct or empty. Run execute_unit_test at first."
                 if not os.path.exists(xml_report_path):
+                    if self.task_state:
+                        self.task_state.set_failed("coverage_pass")
                     return "JaCoCo XML report not found. May be code is not correct or empty. Run execute_unit_test at first."
 
             except Exception as e:
-                logger.error(f"Error during Maven command execution or report file check: {e}")
+                logger.error(
+                    f"Error during Maven command execution or report file check: {e}"
+                )
+                if self.task_state:
+                    self.task_state.set_failed("coverage_pass")
                 return f"Error during Maven command execution or report file check: {e}"
 
             overall_coverage_data = JacocoAnalyzer.parse_jacoco_report(csv_report_path)
             uncovered_data = JacocoAnalyzer.parse_jacoco_report_content(xml_report_path)
 
             # Separate uncovered lines and branch uncovered lines
-            uncovered_lines_by_file = {file_path: data['uncovered'] for file_path, data in uncovered_data.items()}
-            uncovered_branches_by_file = {file_path: data['branch_uncovered'] for file_path, data in uncovered_data.items()}
+            uncovered_lines_by_file = {
+                file_path: data["uncovered"]
+                for file_path, data in uncovered_data.items()
+            }
+            uncovered_branches_by_file = {
+                file_path: data["branch_uncovered"]
+                for file_path, data in uncovered_data.items()
+            }
 
-            return JacocoCoverageReport(
-                line_coverage=overall_coverage_data.get('line_coverage', 0.0),
-                branch_coverage=overall_coverage_data.get('branch_coverage', 0.0),
+            report = JacocoCoverageReport(
+                line_coverage=overall_coverage_data.get("line_coverage", 0.0),
+                branch_coverage=overall_coverage_data.get("branch_coverage", 0.0),
                 uncovered_lines_by_file=uncovered_lines_by_file,
-                uncovered_branches_by_file=uncovered_branches_by_file
+                uncovered_branches_by_file=uncovered_branches_by_file,
             )
 
+            if self.task_state:
+                current_line_coverage = report.line_coverage
+                current_branch_coverage = report.branch_coverage
+                self.coverage_history.append(
+                    [current_line_coverage, current_branch_coverage]
+                )
+
+                # Check for 100% coverage for both line and branch
+                if current_line_coverage == 100.0 and current_branch_coverage == 100.0:
+                    self.task_state.set_success("coverage_pass")
+                # Check for 3 consecutive stable coverages for both line and branch
+                elif len(self.coverage_history) >= 3:
+                    last_three_coverages = self.coverage_history[-3:]
+                    is_line_stable = all(c[0] == current_line_coverage for c in last_three_coverages)
+                    is_branch_stable = all(c[1] == current_branch_coverage for c in last_three_coverages)
+                    if is_line_stable and is_branch_stable:
+                        self.task_state.set_success("coverage_pass")
+                    else:
+                        self.task_state.set_failed("coverage_pass")
+                else:
+                    self.task_state.set_failed("coverage_pass")
+
+            return report
+
         except subprocess.TimeoutExpired:
-             logger.error("Command timed out after 300 seconds.")
-             return "Error: Command execution timed out."
+            logger.error("Command timed out after 300 seconds.")
+            if self.task_state:
+                self.task_state.set_failed("coverage_pass")
+            return "Error: Command execution timed out."
         except Exception as e:
-             logger.exception("An unexpected error occurred during Java unit test execution")
-             return f"An unexpected error occurred during Java unit test execution: {e}"
+            logger.exception(
+                "An unexpected error occurred during Java unit test execution"
+            )
+            if self.task_state:
+                self.task_state.set_failed("coverage_pass")
+            return f"An unexpected error occurred during Java unit test execution: {e}"
 
 class JavaCompileCheck(BaseTool):
     name: str = "java_compile_check"

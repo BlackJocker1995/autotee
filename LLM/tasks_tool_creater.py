@@ -3,11 +3,12 @@ import os
 from langchain_core.tools import BaseTool
 from langchain_community.agent_toolkits import FileManagementToolkit
 
+from LLM.states.task_states import TaskState
 from LLM.tools.cargo_tool import CargoCheckTool
 from LLM.tools.file_tool import ApplyDiffTool, ListProjectStructureTool
 from LLM.tools.language_tools import JacocCoverageTool, JavaCompileCheck, TemplateForTrans, MavenExecuteUnitTestTool
 
-def create_transform_tools(project_root_path: str,  language:str) -> list[BaseTool]:
+def create_transform_tools(project_root_path: str,  language:str, task_state: TaskState) -> list[BaseTool]:
     """
     Factory function to create common project tools, including file management rooted at project_path.
     Custom tools will have project_path, rust_name, and test_number bound via closure.
@@ -24,8 +25,8 @@ def create_transform_tools(project_root_path: str,  language:str) -> list[BaseTo
     tools = [
         ListProjectStructureTool(project_root_path=project_root_path),
         ApplyDiffTool(project_root_path=project_root_path),
-        MavenExecuteUnitTestTool(project_root_path=project_root_path, is_end_point=False),
-        CargoCheckTool(project_root_path=project_root_path),
+        MavenExecuteUnitTestTool(project_root_path=project_root_path, task_state=task_state),
+        CargoCheckTool(project_root_path=project_root_path, task_state=task_state),
         TemplateForTrans(project_root_path=project_root_path)
     ]
     # Only modify the rust code
@@ -47,16 +48,16 @@ def create_template_tools(project_root_path: str,  language:str) -> list[BaseToo
     return tools # type: ignore
 
 
-def create_test_gen_tools(project_root_path: str,  language:str) -> list[BaseTool]:
+def create_test_gen_tools(project_root_path: str,  language:str, task_state: TaskState) -> list[BaseTool]:
     """
     Factory function to create common project tools, including file management rooted at project_path.
     Custom tools will have project_path, rust_name, and test_number bound via closure.
     File management tools will operate relative to project_path.
 
     Args:
-        project_path: The root path for the project, used by custom tools and file management.
-        test_number: The expected number of passing tests for cargo_test.
-        fileconfig: Optional dict specifying directory permissions, e.g. {".": "r", "rust": "rw"}
+        project_root_path: The root path for the project, used by custom tools and file management.
+        language: The programming language of the project.
+        task_state: The task state object for tracking the progress of the task.
 
     Returns:
         A list of configured common and file management tool functions.
@@ -75,9 +76,9 @@ def create_test_gen_tools(project_root_path: str,  language:str) -> list[BaseToo
 
     if language == "java":
         tools.extend([
-        JacocCoverageTool(project_root_path=project_root_path),
+        JacocCoverageTool(project_root_path=project_root_path, task_state=task_state),
         JavaCompileCheck(project_root_path=project_root_path),
-        MavenExecuteUnitTestTool(project_root_path=project_root_path, is_end_point=False)
+        MavenExecuteUnitTestTool(project_root_path=project_root_path, task_state=task_state)
         ])
     elif language == "python":
         pass

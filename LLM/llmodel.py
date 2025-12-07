@@ -1,30 +1,31 @@
+import os
 from abc import ABC
+from typing import Optional, Type
 
+from langchain.agents import create_agent
+from langchain_community.chat_models.tongyi import ChatTongyi
+from langchain_core.messages import SystemMessage
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import Runnable
+from langchain_deepseek import ChatDeepSeek
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from loguru import logger
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
-from typing import   Optional, Type
-import os
 
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI
-from langchain_deepseek import ChatDeepSeek
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import Runnable
-from langchain_core.messages import SystemMessage
-from langchain_community.chat_models.tongyi import ChatTongyi
-from langchain_ollama import ChatOllama
-from langchain.agents import create_agent
 
 class LLMConfig(BaseSettings):
     """Configuration for LLM models. Only contains non-sensitive settings."""
+
     provider: str = "openai"  # Supported: "openai", "qwen", "deepseek", "google"
     model: str = ""
     base_url: str = ""
     token_file: str = "tokenfile"
     request_timeout: int = 300
     max_tokens: int = 4096
-    #max_retries: int = 4
+    # max_retries: int = 4
     system_prompt: str = ""
 
     def get_description(self) -> str:
@@ -34,8 +35,11 @@ class LLMConfig(BaseSettings):
             str: A description of the LLM configuration, suitable for use as a directory name.
         """
         # Replace characters potentially problematic in directory names (like '.') with underscores.
-        safe_model_name = self.model.replace('.', '_').replace('/', '_').replace(':', '-')
+        safe_model_name = (
+            self.model.replace(".", "_").replace("/", "_").replace(":", "-")
+        )
         return f"{self.provider}_{safe_model_name}"
+
 
 def read_token_from_file(token_file: str, provider: str) -> str:
     """Reads the token from the specified file based on the provider."""
@@ -43,7 +47,9 @@ def read_token_from_file(token_file: str, provider: str) -> str:
         return ""
 
     try:
-        token_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), token_file)
+        token_file_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), token_file
+        )
         with open(token_file_path, "r") as f:
             lines = f.readlines()
 
@@ -73,16 +79,17 @@ class LLModel(ABC):
         "qwen": ChatTongyi,  # Assuming Qwen is compatible with OpenAI's interface
         "deepseek": ChatDeepSeek,
         "google": ChatGoogleGenerativeAI,
-        'vllm': ChatOpenAI,
-        'sglang': ChatOpenAI,
-        'ollama': ChatOllama
+        "vllm": ChatOpenAI,
+        "sglang": ChatOpenAI,
+        "ollama": ChatOllama,
     }
     # Provider-specific configuration adjustments
     _provider_base_urls = {
         "ollama": "http://localhost:11434",
         "vllm": "http://localhost:30000/v1",
-        "sglang": "http://10.193.104.137:30000/v1"
+        "sglang": "http://10.193.104.137:30000/v1",
     }
+
     def __init__(self, config: "LLMConfig"):
         """
         Initializes the LLM model based on the provided configuration.
@@ -94,6 +101,8 @@ class LLModel(ABC):
         self.config = config
         self.provider = config.provider
         self.system_prompt = config.system_prompt
+        self.total_input_tokens = 0
+        self.total_completion_tokens = 0
         api_key = read_token_from_file(config.token_file, config.provider)
 
         # Adjust base URL based on provider
@@ -106,12 +115,11 @@ class LLModel(ABC):
         self.llm = chat_model_class(
             model=config.model,
             request_timeout=config.request_timeout,
-            #max_retries=config.max_retries,
-            max_tokens = config.max_tokens,
+            # max_retries=config.max_retries,
+            max_tokens=config.max_tokens,
             api_key=api_key,
-            base_url=config.base_url if config.base_url else None
+            base_url=config.base_url if config.base_url else None,
         )
-
 
     def get_description(self) -> str:
         """
@@ -121,11 +129,13 @@ class LLModel(ABC):
             str: A description of the LLM model, suitable for use as a directory name.
         """
         # Replace characters potentially problematic in directory names (like '.') with underscores.
-        safe_model_name = self.config.model.replace('.', '_').replace('/', '_').replace(':', '-')
+        safe_model_name = (
+            self.config.model.replace(".", "_").replace("/", "_").replace(":", "-")
+        )
         return f"{self.provider}_{safe_model_name}"
 
     @classmethod
-    def get_short_name(cls,model_client:str) -> str:
+    def get_short_name(cls, model_client: str) -> str:
         """
         Get the short name of the model client.
         :param model_client: The name of the model client.
@@ -166,8 +176,9 @@ class LLModel(ABC):
         """
         return cls(config)
 
-
-    def create_chat(self, system_prompt: str = "", output_format: Optional[Type[BaseModel]] = None):
+    def create_chat(
+        self, system_prompt: str = "", output_format: Optional[BaseModel] = None
+    ):
         """
         Creates a chat runnable with the LLM, incorporating a system prompt if provided.
 
@@ -184,10 +195,9 @@ class LLModel(ABC):
             self.system_prompt = system_prompt
 
         # Use the provided system prompt
-        prompt = ChatPromptTemplate.from_messages([
-            SystemMessage(content=self.system_prompt),
-            ("human", "{input}")
-        ])
+        prompt = ChatPromptTemplate.from_messages(
+            [SystemMessage(content=self.system_prompt), ("human", "{input}")]
+        )
 
         if output_format:
             out = prompt | self.llm.with_structured_output(output_format)
@@ -196,7 +206,9 @@ class LLModel(ABC):
 
         return out
 
-    def create_stateless_chat(self, system_prompt: str = "", output_format: Optional[Type[BaseModel]] = None):
+    def create_stateless_chat(
+        self, system_prompt: str = "", output_format: Optional[Type[BaseModel]] = None
+    ):
         """
         Creates a stateless chat runnable that does not modify the instance's system prompt.
 
@@ -213,10 +225,9 @@ class LLModel(ABC):
         # Use the provided system prompt or the instance's default
         current_prompt = system_prompt if system_prompt else self.system_prompt
 
-        prompt = ChatPromptTemplate.from_messages([
-            SystemMessage(content=current_prompt),
-            ("human", "{input}")
-        ])
+        prompt = ChatPromptTemplate.from_messages(
+            [SystemMessage(content=current_prompt), ("human", "{input}")]
+        )
 
         if output_format:
             out = prompt | self.llm.with_structured_output(output_format)
@@ -225,9 +236,7 @@ class LLModel(ABC):
 
         return out
 
-
-
-    def create_tool_react(self, tools: list, system_prompt:str) -> Runnable:
+    def create_tool_react(self, tools: list, system_prompt: str) -> Runnable:
         """
         Creates an agent using the LLM and provided tools.
 

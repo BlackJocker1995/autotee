@@ -1,6 +1,8 @@
 *.env
 .idea
 .vscode
+.venv
+.zed
 *.pdf
 *pyc
 a2no_case
